@@ -1,0 +1,4 @@
+/dist/
+/greflow
+*.test
+coverage.out
