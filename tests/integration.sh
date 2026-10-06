@@ -34,9 +34,12 @@ for spec in "$entry:1" "$exitns:2" "$client:3"; do
     ip netns exec "$ns" iptables -P FORWARD DROP
  done
 gf() { local ns=$1; shift; ip netns exec "$ns" env GREFLOW_ROOT="$work/$ns" "$binary" "$@"; }
+original_forward=$(ip netns exec "$entry" sysctl -n net.ipv4.ip_forward)
+original_rpf=$(ip netns exec "$entry" sysctl -n net.ipv4.conf.all.rp_filter)
 gf "$entry" setup --role entry --local 192.0.2.1 --remote 192.0.2.2 --no-persist
 gf "$exitns" setup --role exit --local 192.0.2.2 --remote 192.0.2.1 --no-persist
 gf "$entry" add tcp 443 2020
+gf "$entry" add tcp 8443 2020
 gf "$exitns" add tcp 2020
 gf "$entry" add udp 444 2021
 gf "$exitns" add udp 2021
@@ -71,13 +74,35 @@ for _ in {1..50}; do [[ -f "$work/ready" ]] && break; sleep 0.1; done
 probe() {
  ip netns exec "$client" python3 - <<'PYTHON'
 import socket
-for proto,port in [('tcp',443),('udp',444),('udp',12000),('udp',12001),('udp',12002)]:
+for proto,port in [('tcp',443),('tcp',8443),('udp',444),('udp',12000),('udp',12001),('udp',12002)]:
  s=socket.socket(socket.AF_INET,socket.SOCK_STREAM if proto=='tcp' else socket.SOCK_DGRAM)
  s.settimeout(3);s.connect(('192.0.2.1',port));s.sendall(b'GreFlow-data-path')
  assert s.recv(1024)==b'GreFlow-data-path',(proto,port)
  s.close()
 PYTHON
 }
+probe
+[[ $(ip netns exec "$entry" iptables -t nat -S GREFLOW_POSTROUTING | grep -c -- '-p tcp') -eq 1 ]]
+# Inject one command failure, then let rollback use the real backend.
+real_iptables=$(command -v iptables)
+mkdir -p "$work/fault-bin"
+cat > "$work/fault-bin/iptables" <<'WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ $* == *'-A GREFLOW_PREROUTING'* && ! -f $GREFLOW_FAULT_FILE ]]; then
+    touch "$GREFLOW_FAULT_FILE"
+    echo 'Injected integration failure' >&2
+    exit 1
+fi
+exec "$GREFLOW_REAL_IPTABLES" "$@"
+WRAPPER
+chmod +x "$work/fault-bin/iptables"
+if PATH="$work/fault-bin:$PATH" GREFLOW_FAULT_FILE="$work/failed-once" GREFLOW_REAL_IPTABLES="$real_iptables" gf "$entry" add udp 445 2021; then
+    echo 'Expected injected failure' >&2
+    exit 1
+fi
+[[ -f "$work/failed-once" ]]
+if gf "$entry" list | grep -q '^UDP 445 '; then exit 1; fi
 probe
 for _ in {1..3}; do gf "$entry" apply; done
 [[ $(ip netns exec "$entry" iptables -S FORWARD | grep -c 'greflow:hook') -eq 1 ]]
@@ -96,9 +121,11 @@ gf "$entry" apply
 probe
 gf "$entry" uninstall --yes
 gf "$exitns" uninstall --yes
+[[ $(ip netns exec "$entry" sysctl -n net.ipv4.ip_forward) == "$original_forward" ]]
+[[ $(ip netns exec "$entry" sysctl -n net.ipv4.conf.all.rp_filter) == "$original_rpf" ]]
 for ns in "$entry" "$exitns"; do
     ip netns exec "$ns" iptables -C INPUT -p tcp --dport 2222 -j DROP
     if ip netns exec "$ns" iptables-save | grep -q GREFLOW_; then exit 1; fi
     if ip -n "$ns" link show greflow0 >/dev/null 2>&1; then exit 1; fi
  done
-echo 'PASS: GRE, TCP mapping, UDP mapping/range, reapply, repair, down/apply, removal, ownership'
+echo 'PASS: GRE, TCP mapping, UDP mapping/range, reapply, repair, down/apply, removal, ownership, shared destinations, failure rollback, sysctl restore'

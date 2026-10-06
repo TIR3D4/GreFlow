@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-const version = "0.1.0"
+var version = "0.1.1"
 
 var input = bufio.NewReader(os.Stdin)
 
@@ -45,7 +45,7 @@ func run(args []string) error {
 		return nil
 	}
 	if args[0] == "help" || args[0] == "--help" {
-		fmt.Println(`GreFlow v0.1.0 — GRE + TCP/UDP forwarding
+		fmt.Println(`GreFlow v0.1.1 — GRE + TCP/UDP forwarding
 setup [--role entry|exit --local IPv4 --remote IPv4 --interface greflow0 --network 10.77.0.0/30 --mtu 1476 --no-persist]
 add tcp|udp PUBLIC_PORT_OR_RANGE [DESTINATION_PORT_OR_RANGE]
 remove tcp|udp PUBLIC_PORT_OR_RANGE
@@ -252,7 +252,7 @@ func setup(m manager.Manager, args []string) error {
 func menu() error {
 	for {
 		fmt.Print(`
-GreFlow v0.1.0
+GreFlow v0.1.1
 1. Install / Setup
 2. Add Port Forward
 3. Remove Port Forward

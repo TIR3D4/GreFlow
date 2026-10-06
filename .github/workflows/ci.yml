@@ -32,7 +32,7 @@ jobs:
           sudo bash tests/integration.sh ./dist/greflow-linux-amd64
       - uses: actions/upload-artifact@v4
         with:
-          name: greflow-v0.1.0-linux
+          name: greflow-linux
           path: dist/*
   release:
     needs: validate
@@ -44,14 +44,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: greflow-v0.1.0-linux
+          name: greflow-linux
           path: dist
-      - name: Publish first validated release
+      - name: Publish validated version
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.1.0 >/dev/null 2>&1; then
-            echo 'v0.1.0 already published; existing release left intact.'
+          version="v$(tr -d '\r\n' < VERSION)"
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [[ "$latest" != "$GITHUB_SHA" ]]; then
+            echo 'A newer commit exists; skip release of stale source.'
+          elif gh release view "$version" >/dev/null 2>&1; then
+            echo "$version already published; existing release left intact."
           else
-            gh release create v0.1.0 dist/* --target "$GITHUB_SHA" --title 'GreFlow v0.1.0' --notes-file docs/release-v0.1.0.md
+            gh release create "$version" dist/* --target "$GITHUB_SHA" --title "GreFlow $version" --notes-file "docs/release-$version.md"
           fi

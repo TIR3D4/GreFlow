@@ -3,7 +3,7 @@
 set -euo pipefail
 [[ ${EUID} -eq 0 ]] || { echo 'Run as root or with sudo.' >&2; exit 1; }
 [[ $(uname -s) == Linux ]] || { echo 'Linux required.' >&2; exit 1; }
-version=${GREFLOW_VERSION:-v0.1.0}
+version=${GREFLOW_VERSION:-v0.1.1}
 [[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid version.' >&2; exit 1; }
 case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo 'Supported architectures: amd64, arm64' >&2; exit 1 ;; esac
 for command in curl sha256sum ip iptables iptables-save sysctl systemctl; do

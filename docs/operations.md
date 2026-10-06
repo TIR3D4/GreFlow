@@ -47,4 +47,4 @@ Audit logs and backups are retained during uninstall for recovery. v0.1 does not
 
 ## Upgrade
 
-The installer backs up an existing binary before replacement. Published version assets are immutable by convention; CI leaves an existing v0.1.0 release intact. Set `GREFLOW_VERSION=vX.Y.Z` for a future published version. Restart only after reviewing release notes and validating the configuration. No telemetry or remote credentials are collected.
+The installer backs up an existing binary before replacement. Published version assets are immutable by convention; CI leaves an existing v0.1.1 release intact. Set `GREFLOW_VERSION=vX.Y.Z` for a future published version. Restart only after reviewing release notes and validating the configuration. No telemetry or remote credentials are collected.

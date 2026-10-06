@@ -5,7 +5,7 @@
 [![CI](https://github.com/TIR3D4/GreFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/TIR3D4/GreFlow/actions/workflows/ci.yml)
 [راهنمای فارسی](docs/README.fa.md) · [Operations](docs/operations.md) · [Architecture](docs/architecture.md)
 
-GreFlow v0.1.0 manages one IPv4 GRE link between two Linux servers. The **entry** accepts public client traffic; DNAT sends it to the **exit** GRE address. SNAT gives replies a predictable return path through the entry. Xray, SSH, Docker and other applications are installed and managed separately.
+GreFlow v0.1.1 manages one IPv4 GRE link between two Linux servers. The **entry** accepts public client traffic; DNAT sends it to the **exit** GRE address. SNAT gives replies a predictable return path through the entry. Xray, SSH, Docker and other applications are installed and managed separately.
 
 **GRE has no encryption or authentication.** This is not an encrypted VPN. Use application-layer TLS/encryption where needed. GRE is IP protocol **47**, not TCP/UDP port 47; providers and intermediate networks can block it. No bypass guarantee is implied.
 
@@ -49,7 +49,7 @@ Root shell one-liner:
 bash <(curl -fLsS https://raw.githubusercontent.com/TIR3D4/GreFlow/main/install.sh)
 ```
 
-The installer downloads this repository's v0.1.0 release binary and verifies SHA256. Checksums detect download corruption; they are not independent release signatures. No third-party installer runs. The release becomes available after all CI checks pass. Installation does not start a tunnel or change firewall settings.
+The installer downloads this repository's v0.1.1 release binary and verifies SHA256. Checksums detect download corruption; they are not independent release signatures. No third-party installer runs. The release becomes available after all CI checks pass. Installation does not start a tunnel or change firewall settings.
 
 Build from source instead (Go 1.22+):
 

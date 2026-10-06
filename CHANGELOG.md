@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Deduplicate shared SNAT/filter rules when multiple public ports use one destination.
+- Expand real-kernel tests for shared destinations and automatic rollback after a firewall failure.
+- Read release version from VERSION and skip stale-commit publication.
+
 ## 0.1.0
 
 - Typed Go CLI and root menu; private IPv4 /30 GRE entry/exit setup.

@@ -11,6 +11,7 @@ import (
 	"github.com/TIR3D4/GreFlow/firewall"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -116,16 +117,30 @@ func (m Manager) sysctl(s *State, k, v string) error {
 }
 func (m Manager) restore(s State) error {
 	var errs []error
-	for k, v := range s.Original {
+	var keys []string
+	for k := range s.Original {
 		cur, e := m.R.Run("sysctl", "-n", k)
 		if e != nil {
 			errs = append(errs, e)
 			continue
 		}
 		if strings.TrimSpace(cur) == s.Written[k] {
-			if _, e = m.R.Run("sysctl", "-w", k+"="+v); e != nil {
-				errs = append(errs, e)
-			}
+			keys = append(keys, k)
+		}
+	}
+	// ip_forward can reset other IPv4 defaults: restore it before the remaining values.
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i] == "net.ipv4.ip_forward" {
+			return true
+		}
+		if keys[j] == "net.ipv4.ip_forward" {
+			return false
+		}
+		return keys[i] < keys[j]
+	})
+	for _, k := range keys {
+		if _, e := m.R.Run("sysctl", "-w", k+"="+s.Original[k]); e != nil {
+			errs = append(errs, e)
 		}
 	}
 	return errors.Join(errs...)
@@ -135,6 +150,16 @@ func (m Manager) host(c config.Config, s *State) error {
 		return e
 	}
 	if c.Role == "entry" {
+		// Capture all global originals before the first kernel mutation.
+		for _, k := range []string{"net.ipv4.ip_forward", "net.ipv4.conf.all.rp_filter"} {
+			if _, ok := s.Original[k]; !ok {
+				v, e := m.R.Run("sysctl", "-n", k)
+				if e != nil {
+					return e
+				}
+				s.Original[k] = strings.TrimSpace(v)
+			}
+		}
 		for _, x := range [][2]string{{"net.ipv4.ip_forward", "1"}, {"net.ipv4.conf.all.rp_filter", "0"}} {
 			if e := m.sysctl(s, x[0], x[1]); e != nil {
 				return e
