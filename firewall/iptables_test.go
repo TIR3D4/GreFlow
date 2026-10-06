@@ -140,3 +140,17 @@ func TestScopedGeneration(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedDestinationDoesNotDuplicateRules(t *testing.T) {
+	c := cfg()
+	c.Forwards = append(c.Forwards, config.Forward{Protocol: "tcp", Public: "8443", Destination: "2020"})
+	n := 0
+	for _, r := range Rules(c) {
+		if r.Chain == "GREFLOW_POSTROUTING" && strings.Contains(strings.Join(r.Args, " "), "-p tcp") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("expected one shared SNAT rule, got %d", n)
+	}
+}

@@ -55,7 +55,17 @@ func Rules(c config.Config) []Rule {
 		add("mangle", "GREFLOW_MANGLE", "-o", c.Interface, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
 	}
 	add("mangle", "GREFLOW_MANGLE", "-i", c.Interface, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu")
-	return rules
+	// Multiple public ports may target one destination; share identical SNAT/filter rules.
+	seen := map[string]bool{}
+	unique := make([]Rule, 0, len(rules))
+	for _, r := range rules {
+		key := r.Table + "\x00" + r.Chain + "\x00" + strings.Join(r.Args, "\x00")
+		if !seen[key] {
+			seen[key] = true
+			unique = append(unique, r)
+		}
+	}
+	return unique
 }
 func (b IPTables) owned(t, ch string) error {
 	s, e := b.run(t, "-S", ch)
