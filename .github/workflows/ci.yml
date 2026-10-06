@@ -59,3 +59,14 @@ jobs:
           else
             gh release create "$version" dist/* --target "$GITHUB_SHA" --title "GreFlow $version" --notes-file "docs/release-$version.md"
           fi
+      - name: Verify published installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="v$(tr -d '\r\n' < VERSION)"
+          if gh release view "$version" >/dev/null 2>&1; then
+            sudo env GREFLOW_VERSION="$version" bash install.sh
+            test "$(greflow version)" = "GreFlow $version"
+          else
+            echo 'Release skipped for stale source; installer smoke test deferred.'
+          fi
