@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type runner struct {
@@ -80,7 +81,7 @@ func TestBackupAndFailedApply(t *testing.T) {
 	}
 }
 func TestLock(t *testing.T) {
-	m := Manager{Root: t.TempDir()}
+	m := Manager{Root: t.TempDir(), LockWait: time.Millisecond}
 	unlock, e := m.Lock()
 	if e != nil {
 		t.Fatal(e)

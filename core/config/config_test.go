@@ -69,3 +69,16 @@ func TestStorage(t *testing.T) {
 		}
 	}
 }
+
+func TestTunnelNames(t *testing.T) {
+	for _, s := range []string{"", "exit2", "a-1", "a_1"} {
+		if e := ValidName(s); e != nil {
+			t.Fatal(s, e)
+		}
+	}
+	for _, s := range []string{"default", "../x", "UPPER", "bad;name", "a1234567890"} {
+		if ValidName(s) == nil {
+			t.Fatal(s)
+		}
+	}
+}

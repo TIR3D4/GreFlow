@@ -1,4 +1,4 @@
-// GreFlow manages one owned GRE link per host. Shells are never used for commands.
+// GreFlow manages independent named GRE links. Shells are never used for commands.
 package main
 
 import (
@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-var version = "0.1.1"
+var version = "0.2.0"
 
 var input = bufio.NewReader(os.Stdin)
 
@@ -37,15 +37,21 @@ func main() {
 	}
 }
 func run(args []string) error {
+	name, args, e := selection(args)
+	if e != nil {
+		return e
+	}
 	if len(args) == 0 {
-		return menu()
+		return menu(name)
 	}
 	if args[0] == "version" || args[0] == "--version" {
 		fmt.Println("GreFlow v" + version)
 		return nil
 	}
 	if args[0] == "help" || args[0] == "--help" {
-		fmt.Println(`GreFlow v0.1.1 — GRE + TCP/UDP forwarding
+		fmt.Println(`GreFlow v0.2.0 — GRE + TCP/UDP forwarding
+[--tunnel NAME] COMMAND (omit NAME for the existing default tunnel)
+tunnels
 setup [--role entry|exit --local IPv4 --remote IPv4 --interface greflow0 --network 10.77.0.0/30 --mtu 1476 --no-persist]
 add tcp|udp PUBLIC_PORT_OR_RANGE [DESTINATION_PORT_OR_RANGE]
 remove tcp|udp PUBLIC_PORT_OR_RANGE
@@ -57,18 +63,18 @@ GRE is unencrypted. Ports on exit must be allowed with add as well.`)
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("run with sudo/root")
 	}
-	m := manager.Manager{Root: os.Getenv("GREFLOW_ROOT"), R: system.Exec{}}
+	m := manager.Manager{Root: os.Getenv("GREFLOW_ROOT"), Name: name, R: system.Exec{}}
 	// systemctl restart/stop invoke this binary: do not hold our lock across them.
 	if args[0] == "restart" {
 		if len(args) != 1 {
 			return fmt.Errorf("restart takes no arguments")
 		}
-		_, e := m.R.Run("systemctl", "restart", "greflow.service")
+		_, e := m.R.Run("systemctl", "restart", m.Service())
 		return e
 	}
 	if args[0] == "uninstall" && m.Root == "" {
 		if len(args) != 2 || args[1] != "--yes" {
-			s, e := ask("Remove GreFlow? Type yes", "no")
+			s, e := ask("Remove tunnel "+m.Label()+"? Type yes", "no")
 			if e != nil {
 				return e
 			}
@@ -76,8 +82,8 @@ GRE is unencrypted. Ports on exit must be allowed with add as well.`)
 				return nil
 			}
 		}
-		if _, e := os.Stat("/etc/systemd/system/greflow.service"); e == nil {
-			if _, e = m.R.Run("systemctl", "stop", "greflow.service"); e != nil {
+		if _, e := os.Stat("/etc/systemd/system/" + m.Service()); e == nil {
+			if _, e = m.R.Run("systemctl", "stop", m.Service()); e != nil {
 				return e
 			}
 		}
@@ -88,6 +94,23 @@ GRE is unencrypted. Ports on exit must be allowed with add as well.`)
 	}
 	defer unlock()
 	switch args[0] {
+	case "tunnels":
+		instances, e := m.Instances()
+		if e != nil {
+			return e
+		}
+		for _, instance := range instances {
+			c, e := config.Load(instance.ConfigPath())
+			if e != nil {
+				return e
+			}
+			state, e := instance.State()
+			if e != nil {
+				return e
+			}
+			fmt.Printf("%s role=%s remote=%s interface=%s network=%s active=%t ports=%d\n", instance.Label(), c.Role, c.Remote, c.Interface, c.Network, state.Active, len(c.Forwards))
+		}
+		return nil
 	case "setup":
 		return setup(m, args[1:])
 	case "uninstall":
@@ -189,7 +212,13 @@ GRE is unencrypted. Ports on exit must be allowed with add as well.`)
 	}
 }
 func setup(m manager.Manager, args []string) error {
-	c := config.Config{Interface: "greflow0", Network: "10.77.0.0/30", MTU: 1476}
+	c := config.Config{Interface: m.DefaultInterface(), Network: "10.77.0.0/30", MTU: 1476}
+	previous, previousErr := config.Load(m.ConfigPath())
+	if previousErr == nil {
+		c.Interface = previous.Interface
+		c.Network = previous.Network
+		c.MTU = previous.MTU
+	}
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	fs.StringVar(&c.Role, "role", "", "entry or exit")
 	fs.StringVar(&c.Local, "local", "", "local IPv4")
@@ -203,6 +232,18 @@ func setup(m manager.Manager, args []string) error {
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected setup arguments")
+	}
+	networkSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "network" {
+			networkSet = true
+		}
+	})
+	if m.Name != "" && len(args) > 0 && previousErr != nil && !networkSet {
+		return fmt.Errorf("new named tunnel requires --network with a unique private /30; use the same subnet on its peer")
+	}
+	if previousErr != nil && !os.IsNotExist(previousErr) {
+		return previousErr
 	}
 	if len(args) == 0 {
 		var e error
@@ -249,11 +290,48 @@ func setup(m manager.Manager, args []string) error {
 	fmt.Println("GRE configured. Configure the other server, then add ports on both sides and run greflow test.")
 	return nil
 }
-func menu() error {
+func selection(args []string) (string, []string, error) {
+	var name string
+	var rest []string
+	seen := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--tunnel" || strings.HasPrefix(a, "--tunnel=") {
+			if seen {
+				return "", nil, fmt.Errorf("--tunnel may appear once")
+			}
+			seen = true
+			if a == "--tunnel" {
+				i++
+				if i == len(args) {
+					return "", nil, fmt.Errorf("--tunnel requires a name")
+				}
+				name = args[i]
+			} else {
+				name = strings.TrimPrefix(a, "--tunnel=")
+			}
+			if name == "" {
+				return "", nil, fmt.Errorf("empty tunnel name")
+			}
+			if name == "default" {
+				name = ""
+			} else if e := config.ValidName(name); e != nil {
+				return "", nil, e
+			}
+		} else {
+			rest = append(rest, a)
+		}
+	}
+	return name, rest, nil
+}
+func menu(name string) error {
 	for {
+		fmt.Printf("\nSelected tunnel: %s\n", manager.Manager{Name: name}.Label())
 		fmt.Print(`
-GreFlow v0.1.1
-1. Install / Setup
+GreFlow v0.2.0
+1. Install / Setup (selected tunnel)
+11. List Tunnels
+12. Select / Create Named Tunnel
 2. Add Port Forward
 3. Remove Port Forward
 4. List Port Forwards
@@ -272,7 +350,22 @@ GreFlow v0.1.1
 		if s == "0" {
 			return nil
 		}
-		cmd := map[string]string{"1": "setup", "2": "add", "3": "remove", "4": "list", "5": "status", "6": "test", "7": "stats", "8": "repair", "9": "restart", "10": "uninstall"}[s]
+		if s == "12" {
+			v, e := ask("Tunnel name (default for existing tunnel)", "default")
+			if e != nil {
+				return e
+			}
+			if v == "default" {
+				name = ""
+			} else if e = config.ValidName(v); e != nil {
+				fmt.Println(e)
+			} else {
+				name = v
+			}
+			continue
+		}
+		fmt.Printf("Selected tunnel: %s\n", manager.Manager{Name: name}.Label())
+		cmd := map[string]string{"1": "setup", "2": "add", "3": "remove", "4": "list", "5": "status", "6": "test", "7": "stats", "8": "repair", "9": "restart", "10": "uninstall", "11": "tunnels"}[s]
 		if cmd == "" {
 			fmt.Println("Invalid selection")
 			continue
@@ -295,6 +388,9 @@ GreFlow v0.1.1
 				}
 				a = append(a, dst)
 			}
+		}
+		if name != "" {
+			a = append([]string{"--tunnel", name}, a...)
 		}
 		if e = run(a); e != nil {
 			fmt.Fprintln(os.Stderr, e)

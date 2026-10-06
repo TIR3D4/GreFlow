@@ -155,3 +155,14 @@ func Save(path string, v any) error {
 	}
 	return os.Rename(name, path)
 }
+
+// ValidName constrains instance names used in filesystem paths and systemd units.
+func ValidName(name string) error {
+	if name == "" {
+		return nil
+	}
+	if name == "default" || !regexp.MustCompile(`^[a-z][a-z0-9_-]{0,9}$`).MatchString(name) {
+		return fmt.Errorf("tunnel name must be 1..10 lowercase letters/digits/_/- and cannot be default")
+	}
+	return nil
+}

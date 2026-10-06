@@ -26,8 +26,10 @@ type State struct {
 	Verified bool              `json:"user_verified"`
 }
 type Manager struct {
-	Root string
-	R    system.Runner
+	Root     string
+	Name     string
+	LockWait time.Duration
+	R        system.Runner
 }
 
 func (m Manager) Path(s string) string {
@@ -36,8 +38,18 @@ func (m Manager) Path(s string) string {
 	}
 	return filepath.Join(m.Root, strings.TrimPrefix(s, "/"))
 }
-func (m Manager) ConfigPath() string { return m.Path("/etc/greflow/config.json") }
-func (m Manager) StatePath() string  { return m.Path("/var/lib/greflow/state.json") }
+func (m Manager) ConfigPath() string {
+	if m.Name != "" {
+		return m.Path("/etc/greflow/tunnels/" + m.Name + "/config.json")
+	}
+	return m.Path("/etc/greflow/config.json")
+}
+func (m Manager) StatePath() string {
+	if m.Name != "" {
+		return m.Path("/var/lib/greflow/tunnels/" + m.Name + "/state.json")
+	}
+	return m.Path("/var/lib/greflow/state.json")
+}
 func (m Manager) Lock() (func(), error) {
 	p := m.Path("/run/greflow.lock")
 	if e := os.MkdirAll(filepath.Dir(p), 0700); e != nil {
@@ -47,9 +59,25 @@ func (m Manager) Lock() (func(), error) {
 	if e != nil {
 		return nil, e
 	}
-	if e = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
-		f.Close()
-		return nil, fmt.Errorf("another GreFlow operation is running")
+	wait := m.LockWait
+	if wait == 0 {
+		wait = 60 * time.Second
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		e = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if e == nil {
+			break
+		}
+		if e != syscall.EWOULDBLOCK && e != syscall.EAGAIN {
+			f.Close()
+			return nil, e
+		}
+		if time.Now().After(deadline) {
+			f.Close()
+			return nil, fmt.Errorf("timed out waiting for another GreFlow operation")
+		}
+		time.Sleep(time.Millisecond * 20)
 	}
 	return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); _ = f.Close() }, nil
 }
@@ -77,11 +105,11 @@ func (m Manager) log(msg string) {
 	f, e := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if e == nil {
 		defer f.Close()
-		_ = json.NewEncoder(f).Encode(map[string]any{"time": time.Now().UTC(), "message": msg})
+		_ = json.NewEncoder(f).Encode(map[string]any{"time": time.Now().UTC(), "message": msg, "tunnel": m.Label()})
 	}
 }
 func (m Manager) backup(s State) (string, error) {
-	p := m.Path("/var/lib/greflow/backups/" + time.Now().UTC().Format("20060102T150405.000000000"))
+	p := m.Path("/var/lib/greflow/backups/" + m.BackupPrefix() + time.Now().UTC().Format("20060102T150405.000000000"))
 	if e := config.Save(filepath.Join(p, "state.json"), s); e != nil {
 		return "", e
 	}
@@ -116,6 +144,19 @@ func (m Manager) sysctl(s *State, k, v string) error {
 	return e
 }
 func (m Manager) restore(s State) error {
+	siblings, e := m.Siblings()
+	if e != nil {
+		return e
+	}
+	for _, other := range siblings {
+		state, e := other.State()
+		if e != nil {
+			return e
+		}
+		if state.Active && state.Config != nil && state.Config.Role == "entry" {
+			return nil
+		}
+	}
 	var errs []error
 	var keys []string
 	for k := range s.Original {
@@ -130,6 +171,9 @@ func (m Manager) restore(s State) error {
 	}
 	// ip_forward can reset other IPv4 defaults: restore it before the remaining values.
 	sort.Slice(keys, func(i, j int) bool {
+		if keys[i] == keys[j] {
+			return false
+		}
 		if keys[i] == "net.ipv4.ip_forward" {
 			return true
 		}
@@ -146,10 +190,13 @@ func (m Manager) restore(s State) error {
 	return errors.Join(errs...)
 }
 func (m Manager) host(c config.Config, s *State) error {
-	if e := tunnel.Apply(m.R, c); e != nil {
+	if e := tunnel.ApplyOwned(m.R, c, m.Alias()); e != nil {
 		return e
 	}
 	if c.Role == "entry" {
+		if e := m.inheritOriginal(s); e != nil {
+			return e
+		}
 		// Capture all global originals before the first kernel mutation.
 		for _, k := range []string{"net.ipv4.ip_forward", "net.ipv4.conf.all.rp_filter"} {
 			if _, ok := s.Original[k]; !ok {
@@ -172,10 +219,16 @@ func (m Manager) host(c config.Config, s *State) error {
 			return e
 		}
 	}
-	return (firewall.IPTables{R: m.R}).Apply(c)
+	return (firewall.IPTables{R: m.R, Name: m.Name}).Apply(c)
 }
 func (m Manager) Apply(c config.Config) error {
 	if e := c.Validate(); e != nil {
+		return e
+	}
+	if e := config.ValidName(m.Name); e != nil {
+		return e
+	}
+	if e := m.ValidatePeers(c); e != nil {
 		return e
 	}
 	old, e := m.State()
@@ -258,7 +311,7 @@ func (m Manager) Apply(c config.Config) error {
 func (m Manager) failed(cause error, old, next State, c config.Config) error {
 	m.log("apply failed: " + cause.Error())
 	var cleanup []error
-	cleanup = append(cleanup, (firewall.IPTables{R: m.R}).Remove(), tunnel.Down(m.R, c), m.restore(next))
+	cleanup = append(cleanup, (firewall.IPTables{R: m.R, Name: m.Name}).Remove(), tunnel.DownOwned(m.R, c, m.Alias()), m.restore(next))
 	if old.Active && old.Config != nil {
 		cleanup = append(cleanup, m.host(*old.Config, &old))
 	}
@@ -278,10 +331,10 @@ func (m Manager) Down() error {
 	if s.Config == nil {
 		return nil
 	}
-	if e = (firewall.IPTables{R: m.R}).Remove(); e != nil {
+	if e = (firewall.IPTables{R: m.R, Name: m.Name}).Remove(); e != nil {
 		return e
 	}
-	if e = tunnel.Down(m.R, *s.Config); e != nil {
+	if e = tunnel.DownOwned(m.R, *s.Config, m.Alias()); e != nil {
 		return e
 	}
 	if e = m.restore(s); e != nil {
@@ -314,29 +367,41 @@ TimeoutStopSec=120
 WantedBy=multi-user.target
 `
 
+func (m Manager) UnitText() string {
+	if m.Name == "" {
+		return Unit
+	}
+	return strings.NewReplacer("/etc/greflow/config.json", "/etc/greflow/tunnels/"+m.Name+"/config.json", "greflow apply", "greflow --tunnel "+m.Name+" apply", "greflow down", "greflow --tunnel "+m.Name+" down").Replace(Unit)
+}
 func (m Manager) Persist() error {
 	if m.Root != "" {
 		return fmt.Errorf("systemd persistence unavailable with GREFLOW_ROOT")
 	}
-	if e := os.WriteFile("/etc/systemd/system/greflow.service", []byte(Unit), 0644); e != nil {
+	if e := config.ValidName(m.Name); e != nil {
+		return e
+	}
+	if e := os.WriteFile("/etc/systemd/system/"+m.Service(), []byte(m.UnitText()), 0644); e != nil {
 		return e
 	}
 	if _, e := m.R.Run("systemctl", "daemon-reload"); e != nil {
 		return e
 	}
-	_, e := m.R.Run("systemctl", "enable", "greflow.service")
+	_, e := m.R.Run("systemctl", "enable", m.Service())
 	return e
 }
+
+// Uninstall removes the selected instance; the binary stays while siblings exist.
 func (m Manager) Uninstall() error {
 	if e := m.Down(); e != nil {
 		return e
 	}
 	if m.Root == "" {
-		if _, e := os.Stat("/etc/systemd/system/greflow.service"); e == nil {
-			if _, e = m.R.Run("systemctl", "disable", "greflow.service"); e != nil {
+		unit := "/etc/systemd/system/" + m.Service()
+		if _, e := os.Stat(unit); e == nil {
+			if _, e = m.R.Run("systemctl", "disable", m.Service()); e != nil {
 				return e
 			}
-			if e = os.Remove("/etc/systemd/system/greflow.service"); e != nil {
+			if e = os.Remove(unit); e != nil {
 				return e
 			}
 			if _, e = m.R.Run("systemctl", "daemon-reload"); e != nil {
@@ -344,17 +409,25 @@ func (m Manager) Uninstall() error {
 			}
 		}
 	}
-	for _, p := range []string{"/etc/greflow", "/var/lib/greflow/state.json"} {
-		if e := os.RemoveAll(m.Path(p)); e != nil {
+	for _, p := range []string{m.ConfigPath(), m.StatePath()} {
+		if e := os.Remove(p); e != nil && !os.IsNotExist(e) {
 			return e
 		}
 	}
-	if m.Root == "" {
+	if m.Name != "" {
+		_ = os.Remove(filepath.Dir(m.ConfigPath()))
+		_ = os.Remove(filepath.Dir(m.StatePath()))
+	}
+	siblings, e := m.Siblings()
+	if e != nil {
+		return e
+	}
+	if len(siblings) == 0 && m.Root == "" {
 		if e := os.Remove("/usr/local/bin/greflow"); e != nil && !os.IsNotExist(e) {
 			return e
 		}
 	}
-	m.log("uninstalled; recovery backups and audit logs retained")
+	m.log("instance uninstalled; recovery backups and audit logs retained")
 	return nil
 }
 func (m Manager) Rollback(dir string) error {

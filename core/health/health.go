@@ -33,16 +33,16 @@ func Status(m manager.Manager, c config.Config, probe bool) error {
 		return e
 	}
 	if m.Root == "" {
-		_, e = m.R.Run("systemctl", "is-enabled", "greflow.service")
+		_, e = m.R.Run("systemctl", "is-enabled", m.Service())
 		check("H0 persistence enabled", e)
-		v, _ := m.R.Run("systemctl", "is-active", "greflow.service")
+		v, _ := m.R.Run("systemctl", "is-active", m.Service())
 		fmt.Printf("Service state: %s", v)
 	} else {
 		fmt.Println("H0 persistence UNKNOWN (test root)")
 	}
 	l, e := tunnel.Inspect(m.R, c.Interface)
 	if e == nil {
-		if l.Alias != tunnel.Alias || !strings.Contains(strings.Join(l.Flags, " "), "UP") {
+		if l.Alias != m.Alias() || !strings.Contains(strings.Join(l.Flags, " "), "UP") {
 			e = fmt.Errorf("interface ownership/state mismatch")
 		}
 	}
@@ -82,7 +82,12 @@ func Status(m manager.Manager, c config.Config, probe bool) error {
 	} else {
 		fmt.Println("H2/H3 UNKNOWN (run greflow test)")
 	}
-	check("H4 firewall rules", (firewall.IPTables{R: m.R}).Check(c))
+	if probe {
+		if refreshed, err := tunnel.Inspect(m.R, c.Interface); err == nil {
+			l = refreshed
+		}
+	}
+	check("H4 firewall rules", (firewall.IPTables{R: m.R, Name: m.Name}).Check(c))
 	fmt.Printf("H5 traffic RX=%d TX=%d bytes\n", l.Stats.RX.Bytes, l.Stats.TX.Bytes)
 	if s.Verified && s.Active {
 		fmt.Println("H6 user verified YES")
@@ -96,7 +101,7 @@ func Status(m manager.Manager, c config.Config, probe bool) error {
 }
 func Doctor(m manager.Manager, c config.Config) error {
 	e := Status(m, c, true)
-	for _, cmd := range [][]string{{"ip", "route", "get", c.Remote}, {"ip", "-d", "link", "show", "dev", c.Interface}, {"sysctl", "net.ipv4.ip_forward", "net.ipv4.conf.all.rp_filter", "net.ipv4.conf." + c.Interface + ".rp_filter", "net.netfilter.nf_conntrack_count", "net.netfilter.nf_conntrack_max"}, {"iptables", "--version"}, {"ss", "-lntup"}, {"iptables", "-w", "5", "-t", "nat", "-nvxL", "GREFLOW_PREROUTING"}} {
+	for _, cmd := range [][]string{{"ip", "route", "get", c.Remote}, {"ip", "-d", "link", "show", "dev", c.Interface}, {"sysctl", "net.ipv4.ip_forward", "net.ipv4.conf.all.rp_filter", "net.ipv4.conf." + c.Interface + ".rp_filter", "net.netfilter.nf_conntrack_count", "net.netfilter.nf_conntrack_max"}, {"iptables", "--version"}, {"ss", "-lntup"}, {"iptables", "-w", "5", "-t", "nat", "-nvxL", firewall.ChainName(m.Name, "GREFLOW_PREROUTING")}} {
 		v, ce := m.R.Run(cmd[0], cmd[1:]...)
 		fmt.Printf("\n$ %s\n%s", strings.Join(cmd, " "), v)
 		if ce != nil {
@@ -118,7 +123,7 @@ func Stats(m manager.Manager, c config.Config) error {
 		return e
 	}
 	fmt.Printf("Tunnel %s age=%s RX=%d TX=%d bytes\n", c.Interface, time.Since(s.Since).Round(time.Second), l.Stats.RX.Bytes, l.Stats.TX.Bytes)
-	for _, cmd := range [][]string{{"iptables", "-w", "5", "-t", "nat", "-nvxL", "GREFLOW_PREROUTING"}, {"iptables", "-w", "5", "-t", "filter", "-nvxL", "GREFLOW_FORWARD"}, {"sysctl", "net.netfilter.nf_conntrack_count", "net.netfilter.nf_conntrack_max"}, {"ss", "-s"}} {
+	for _, cmd := range [][]string{{"iptables", "-w", "5", "-t", "nat", "-nvxL", firewall.ChainName(m.Name, "GREFLOW_PREROUTING")}, {"iptables", "-w", "5", "-t", "filter", "-nvxL", firewall.ChainName(m.Name, "GREFLOW_FORWARD")}, {"sysctl", "net.netfilter.nf_conntrack_count", "net.netfilter.nf_conntrack_max"}, {"ss", "-s"}} {
 		v, ce := m.R.Run(cmd[0], cmd[1:]...)
 		fmt.Print(v)
 		if ce != nil {

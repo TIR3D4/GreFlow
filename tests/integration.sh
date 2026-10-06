@@ -8,18 +8,19 @@ suffix=$$
 entry="gf-entry-$suffix"
 exitns="gf-exit-$suffix"
 client="gf-client-$suffix"
+exit2="gf-exit2-$suffix"
 bridge="gfb$suffix"
 pids=()
 cleanup() {
     for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
-    for ns in "$entry" "$exitns" "$client"; do ip netns del "$ns" 2>/dev/null || true; done
+    for ns in "$entry" "$exitns" "$client" "$exit2"; do ip netns del "$ns" 2>/dev/null || true; done
     ip link del "$bridge" 2>/dev/null || true
     rm -rf "$work"
 }
 trap cleanup EXIT
 ip link add "$bridge" type bridge
 ip link set "$bridge" up
-for spec in "$entry:1" "$exitns:2" "$client:3"; do
+for spec in "$entry:1" "$exitns:2" "$client:3" "$exit2:4"; do
     ns=${spec%:*}; octet=${spec##*:}
     ip netns add "$ns"
     ip link add "gfv${suffix}$octet" type veth peer name eth0 netns "$ns"
@@ -52,7 +53,7 @@ lock=threading.Lock()
 def echo(proto,port):
  global ready
  s=socket.socket(socket.AF_INET, socket.SOCK_STREAM if proto=='tcp' else socket.SOCK_DGRAM)
- s.bind(('10.77.0.2',port))
+ s.bind((__import__('sys').argv[2] if len(__import__('sys').argv)>2 else '10.77.0.2',port))
  if proto=='tcp': s.listen()
  with lock: ready+=1
  while True:
@@ -119,13 +120,67 @@ gf "$entry" down
 if ip -n "$entry" link show greflow0 >/dev/null 2>&1; then exit 1; fi
 gf "$entry" apply
 probe
+# One entry, two real exits: legacy config coexists with a named instance.
+gf "$entry" --tunnel exit2 setup --role entry --local 192.0.2.1 --remote 192.0.2.4 --network 10.77.0.4/30 --no-persist
+gf "$exit2" --tunnel exit2 setup --role exit --local 192.0.2.4 --remote 192.0.2.1 --network 10.77.0.4/30 --no-persist
+gf "$entry" --tunnel exit2 add tcp 3212 2020
+gf "$entry" --tunnel exit2 add udp 445 2021
+gf "$exit2" --tunnel exit2 add tcp 2020
+gf "$exit2" --tunnel exit2 add udp 2021
+ip netns exec "$exit2" python3 "$work/echo.py" "$work/ready2" 10.77.0.6 &
+pids+=("$!")
+for _ in {1..50}; do [[ -f "$work/ready2" ]] && break; sleep 0.1; done
+[[ -f "$work/ready2" ]]
+probe2() {
+ ip netns exec "$client" python3 - <<'PYTHON'
+import socket
+for proto,port in [('tcp',3212),('udp',445)]:
+ s=socket.socket(socket.AF_INET,socket.SOCK_STREAM if proto=='tcp' else socket.SOCK_DGRAM)
+ s.settimeout(3);s.connect(('192.0.2.1',port));s.sendall(b'GreFlow-second-exit')
+ assert s.recv(1024)==b'GreFlow-second-exit',(proto,port)
+ s.close()
+PYTHON
+}
+probe
+probe2
+# Collisions must be refused before any host mutation.
+if gf "$entry" --tunnel exit2 add tcp 443 2020; then exit 1; fi
+if gf "$entry" --tunnel badnet setup --role entry --local 192.0.2.1 --remote 192.0.2.99 --network 10.77.0.0/30 --no-persist; then exit 1; fi
+if gf "$entry" --tunnel badpair setup --role entry --local 192.0.2.1 --remote 192.0.2.2 --network 10.77.0.8/30 --no-persist; then exit 1; fi
+before=$(ip -n "$entry" -o link show greflow0 | cut -d: -f1)
+gf "$entry" --tunnel exit2 repair
+[[ $(ip -n "$entry" -o link show greflow0 | cut -d: -f1) == "$before" ]]
+probe
+probe2
+# Reboot reconstruction: concurrent applies serialize using the host-wide lock.
+gf "$entry" down
+gf "$entry" --tunnel exit2 down
+gf "$entry" apply &
+first=$!
+gf "$entry" --tunnel exit2 apply &
+second=$!
+wait "$first"
+wait "$second"
+probe
+probe2
+# Removing either tunnel must leave the other data path and forwarding enabled.
+gf "$entry" --tunnel exit2 down
+[[ $(ip netns exec "$entry" sysctl -n net.ipv4.ip_forward) == 1 ]]
+probe
+gf "$entry" --tunnel exit2 apply
+probe2
 gf "$entry" uninstall --yes
+probe2
+[[ $(ip netns exec "$entry" sysctl -n net.ipv4.ip_forward) == 1 ]]
+gf "$entry" tunnels | grep -q '^exit2 '
+gf "$entry" --tunnel exit2 uninstall --yes
 gf "$exitns" uninstall --yes
+gf "$exit2" --tunnel exit2 uninstall --yes
 [[ $(ip netns exec "$entry" sysctl -n net.ipv4.ip_forward) == "$original_forward" ]]
 [[ $(ip netns exec "$entry" sysctl -n net.ipv4.conf.all.rp_filter) == "$original_rpf" ]]
-for ns in "$entry" "$exitns"; do
+for ns in "$entry" "$exitns" "$exit2"; do
     ip netns exec "$ns" iptables -C INPUT -p tcp --dport 2222 -j DROP
-    if ip netns exec "$ns" iptables-save | grep -q GREFLOW_; then exit 1; fi
+    if ip netns exec "$ns" iptables-save | grep -Eq 'GREFLOW_|GF_[0-9a-f]{12}_'; then exit 1; fi
     if ip -n "$ns" link show greflow0 >/dev/null 2>&1; then exit 1; fi
  done
-echo 'PASS: GRE, TCP mapping, UDP mapping/range, reapply, repair, down/apply, removal, ownership, shared destinations, failure rollback, sysctl restore'
+echo 'PASS: GRE, TCP mapping, UDP mapping/range, reapply, repair, down/apply, removal, ownership, shared destinations, failure rollback, sysctl restore, two exits, instance isolation, conflicts, concurrent boot apply'

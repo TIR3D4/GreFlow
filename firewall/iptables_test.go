@@ -83,7 +83,7 @@ func cfg() config.Config {
 func TestApplyRepairAndOwnership(t *testing.T) {
 	f := newFake()
 	f.tables["filter"]["FORWARD"] = []string{"-j USER_RULE"}
-	b := IPTables{f}
+	b := IPTables{R: f}
 	c := cfg()
 	for i := 0; i < 3; i++ {
 		if e := b.Apply(c); e != nil {
@@ -114,7 +114,7 @@ func TestApplyRepairAndOwnership(t *testing.T) {
 func TestRefuseForeignRules(t *testing.T) {
 	f := newFake()
 	f.tables["filter"]["GREFLOW_FORWARD"] = []string{"-j FOREIGN"}
-	b := IPTables{f}
+	b := IPTables{R: f}
 	if b.Apply(cfg()) == nil {
 		t.Fatal("accepted foreign rules")
 	}
@@ -152,5 +152,56 @@ func TestSharedDestinationDoesNotDuplicateRules(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("expected one shared SNAT rule, got %d", n)
+	}
+}
+
+func TestNamedChainsAreIsolated(t *testing.T) {
+	f := newFake()
+	legacy := IPTables{R: f}
+	second := IPTables{R: f, Name: "exit2"}
+	third := IPTables{R: f, Name: "exit3"}
+	c := cfg()
+	if e := legacy.Apply(c); e != nil {
+		t.Fatal(e)
+	}
+	if e := second.Apply(c); e != nil {
+		t.Fatal(e)
+	}
+	if e := third.Apply(c); e != nil {
+		t.Fatal(e)
+	}
+	for _, b := range []IPTables{legacy, second, third} {
+		for _, x := range b.chains() {
+			if len(x[2]) > 28 {
+				t.Fatal(x[2])
+			}
+			if e := b.Check(c); e != nil {
+				t.Fatal(e)
+			}
+		}
+	}
+	if e := second.Remove(); e != nil {
+		t.Fatal(e)
+	}
+	if e := legacy.Check(c); e != nil {
+		t.Fatal("legacy removed", e)
+	}
+	if e := third.Check(c); e != nil {
+		t.Fatal("other tunnel removed", e)
+	}
+	if e := second.Apply(c); e != nil {
+		t.Fatal(e)
+	}
+	if e := second.Apply(c); e != nil {
+		t.Fatal(e)
+	}
+	hooks := 0
+	for _, rule := range f.tables["filter"]["FORWARD"] {
+		if strings.Contains(rule, "greflow:exit2:hook") {
+			hooks++
+		}
+	}
+	if hooks != 1 {
+		t.Fatal("duplicate instance hook", hooks)
 	}
 }

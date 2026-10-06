@@ -35,7 +35,8 @@ func Inspect(r system.Runner, name string) (Link, error) {
 	}
 	return l[0], nil
 }
-func Down(r system.Runner, c config.Config) error {
+func Down(r system.Runner, c config.Config) error { return DownOwned(r, c, Alias) }
+func DownOwned(r system.Runner, c config.Config, alias string) error {
 	l, e := Inspect(r, c.Interface)
 	if e != nil {
 		if _, allErr := r.Run("ip", "-j", "link", "show"); allErr != nil {
@@ -43,18 +44,19 @@ func Down(r system.Runner, c config.Config) error {
 		}
 		return nil
 	}
-	if l.Alias != Alias {
+	if l.Alias != alias {
 		return fmt.Errorf("refusing unowned interface %s", c.Interface)
 	}
 	_, e = r.Run("ip", "link", "delete", c.Interface)
 	return e
 }
-func Apply(r system.Runner, c config.Config) error {
+func Apply(r system.Runner, c config.Config) error { return ApplyOwned(r, c, Alias) }
+func ApplyOwned(r system.Runner, c config.Config, alias string) error {
 	if l, e := Inspect(r, c.Interface); e == nil {
-		if l.Alias != Alias {
+		if l.Alias != alias {
 			return fmt.Errorf("interface %s belongs to another application", c.Interface)
 		}
-		if e = Down(r, c); e != nil {
+		if e = DownOwned(r, c, alias); e != nil {
 			return e
 		}
 	}
@@ -63,7 +65,7 @@ func Apply(r system.Runner, c config.Config) error {
 		return e
 	}
 	// Set ownership immediately; cleanup is safe even if subsequent steps fail.
-	if _, e = r.Run("ip", "link", "set", "dev", c.Interface, "alias", Alias); e != nil {
+	if _, e = r.Run("ip", "link", "set", "dev", c.Interface, "alias", alias); e != nil {
 		_, _ = r.Run("ip", "link", "delete", c.Interface)
 		return e
 	}

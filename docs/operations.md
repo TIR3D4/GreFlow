@@ -48,3 +48,15 @@ Audit logs and backups are retained during uninstall for recovery. v0.1 does not
 ## Upgrade
 
 The installer backs up an existing binary before replacement. Published version assets are immutable by convention; CI leaves an existing v0.1.1 release intact. Set `GREFLOW_VERSION=vX.Y.Z` for a future published version. Restart only after reviewing release notes and validating the configuration. No telemetry or remote credentials are collected.
+
+## v0.2 named instance operations and upgrade
+
+The default legacy paths/alias/service remain compatible. Upgrade the binary with install.sh; it preserves configs and does not restart tunnels. There is no on-disk migration. A rollback to v0.1 supports only the old default, so remove/stop named services before downgrading the binary.
+
+`greflow tunnels` lists all configurations. Commands accept `--tunnel NAME` before or after the command. Default can be selected by omitting the flag or using `--tunnel default`. Named backups are in `/var/lib/greflow/backups/NAME/TIMESTAMP`; use the matching selector when rolling them back. Lifecycle logs are shared JSONL with a tunnel label.
+
+Uninstall is instance-scoped. Removing default does not delete named config directories; removing a named instance does not delete default. The installed binary stays until no configured siblings remain. Stop/disable a named tunnel persistently with `systemctl disable --now greflow-NAME.service`.
+
+Startup operations wait up to 60 seconds for the host-wide lock; unit timeout remains 120 seconds. Typical configs start quickly, but large rule sets or stalled system commands can time out. No blanket concurrency promise is made for arbitrarily large installations. Configs reserve interfaces, networks and entry public ports even when inactive; uninstall an unused config to release those reservations.
+
+Existing active entries share a saved global sysctl baseline. Keep state files intact. Removing one does not disable forwarding for its peers. Health refreshes interface counters after active probes; packet counters/ICMP/TCP still are not a full Xray handshake. v0.2 never forces the host's global ICMP echo policy to change.
