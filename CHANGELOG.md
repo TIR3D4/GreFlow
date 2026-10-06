@@ -4,6 +4,7 @@
 
 - Deduplicate shared SNAT/filter rules when multiple public ports use one destination.
 - Expand real-kernel tests for shared destinations and automatic rollback after a firewall failure.
+- Count forwarded conntrack entries using original public and translated reply tuples.
 - Read release version from VERSION and skip stale-commit publication.
 
 ## 0.1.0

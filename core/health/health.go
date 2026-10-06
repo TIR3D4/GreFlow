@@ -127,26 +127,7 @@ func Stats(m manager.Manager, c config.Config) error {
 	}
 	fmt.Println("NAT counters count initial packets; FORWARD counters count traffic. ss reports local sockets, not forwarded connections.")
 	if v, ce := m.R.Run("conntrack", "-L", "-o", "extended"); ce == nil {
-		_, peer := c.Addresses()
-		counts := map[string]int{}
-		for _, line := range strings.Split(v, "\n") {
-			if !strings.Contains(line, "dst="+peer+" ") {
-				continue
-			}
-			for _, f := range c.Forwards {
-				a, b, _ := config.Range(f.Destination)
-				for _, field := range strings.Fields(line) {
-					if strings.HasPrefix(field, "dport=") {
-						var p int
-						_, _ = fmt.Sscanf(field, "dport=%d", &p)
-						if p >= a && p <= b && strings.HasPrefix(line, f.Protocol+" ") {
-							counts[f.Protocol+":"+f.Public]++
-						}
-						break
-					}
-				}
-			}
-		}
+		counts := CountForwarded(v, c)
 		fmt.Printf("Forwarded conntrack entries: %v\n", counts)
 	} else {
 		fmt.Println("Per-port connections UNKNOWN (install conntrack)")
@@ -168,4 +149,45 @@ func Tune(m manager.Manager) error {
 	}
 	fmt.Println("Advisory only. Increase conntrack capacity only for measured saturation with RAM headroom; shorten timeouts only after testing long-lived connections. No kernel values changed.")
 	return nil
+}
+
+// CountForwarded matches conntrack's original public tuple and translated reply tuple.
+func CountForwarded(output string, c config.Config) map[string]int {
+	counts := map[string]int{}
+	if c.Role != "entry" {
+		return counts
+	}
+	local, peer := c.Addresses()
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		var src, dst, dport []string
+		for _, field := range fields {
+			if strings.HasPrefix(field, "src=") {
+				src = append(src, strings.TrimPrefix(field, "src="))
+			}
+			if strings.HasPrefix(field, "dst=") {
+				dst = append(dst, strings.TrimPrefix(field, "dst="))
+			}
+			if strings.HasPrefix(field, "dport=") {
+				dport = append(dport, strings.TrimPrefix(field, "dport="))
+			}
+		}
+		if len(src) != 2 || len(dst) != 2 || len(dport) != 2 || dst[0] != c.Local || src[1] != peer || dst[1] != local {
+			continue
+		}
+		var port int
+		if _, e := fmt.Sscanf(dport[0], "%d", &port); e != nil {
+			continue
+		}
+		for _, f := range c.Forwards {
+			a, b, _ := config.Range(f.Public)
+			if fields[0] == f.Protocol && port >= a && port <= b {
+				counts[f.Protocol+":"+f.Public]++
+			}
+		}
+	}
+	return counts
 }
