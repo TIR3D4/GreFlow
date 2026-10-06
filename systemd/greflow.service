@@ -1,0 +1,16 @@
+[Unit]
+Description=GreFlow GRE tunnel and port forwarding
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/greflow/config.json
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/greflow apply
+ExecStop=/usr/local/bin/greflow down
+TimeoutStartSec=120
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

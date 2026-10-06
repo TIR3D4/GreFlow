@@ -1,0 +1,9 @@
+{
+  "role": "entry",
+  "local": "192.0.2.1",
+  "remote": "192.0.2.2",
+  "interface": "greflow0",
+  "network": "10.77.0.0/30",
+  "mtu": 1476,
+  "forwards": [{"protocol": "tcp", "public": "443", "destination": "2020"}]
+}
