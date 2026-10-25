@@ -205,3 +205,32 @@ func TestNamedChainsAreIsolated(t *testing.T) {
 		t.Fatal("duplicate instance hook", hooks)
 	}
 }
+
+func TestMappingDifferencePreservesUnrelatedRulesAndRollsBack(t *testing.T) {
+	f := newFake()
+	b := IPTables{R: f}
+	old := cfg()
+	if e := b.Apply(old); e != nil {
+		t.Fatal(e)
+	}
+	next := old
+	next.Forwards = append(append([]config.Forward{}, old.Forwards...), config.Forward{Protocol: "tcp", Public: "2021", Destination: "2021"})
+	before := strings.Join(f.tables["filter"]["FORWARD"], "\n")
+	if e := b.Update(old, next); e != nil {
+		t.Fatal(e)
+	}
+	if before != strings.Join(f.tables["filter"]["FORWARD"], "\n") {
+		t.Fatal("hooks altered")
+	}
+	if e := b.Update(next, old); e != nil {
+		t.Fatal(e)
+	}
+	if e := b.Check(old); e != nil {
+		t.Fatal(e)
+	}
+	for _, r := range f.tables["nat"]["GREFLOW_PREROUTING"] {
+		if strings.Contains(r, "--dport 2021") {
+			t.Fatal("new rule survived rollback")
+		}
+	}
+}

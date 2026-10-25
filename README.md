@@ -1,6 +1,57 @@
-# GreFlow
+![GreFlow Console](docs/assets/greflow-banner.png)
 
-**GRE tunnels and TCP/UDP port forwarding, with a small Go CLI.**
+# GreFlow Console 1.0
+
+پنل فارسی و RTL برای مدیریت واقعی سرورهای GRE و پورت‌ها؛ قابل اجرا روی ویندوز و لینوکس.
+
+**[دانلود نسخهٔ کنسول](https://github.com/TIR3D4/GreFlow/releases/tag/console-v1.0.0)** ·
+[نصب و اجرا](docs/console/RUN.fa.md) · [آموزش استفاده](docs/console/USAGE.fa.md) ·
+[رفع اشکال](docs/console/TROUBLESHOOTING.fa.md) · [تست‌ها و محدودیت‌ها](docs/console/TEST-RESULTS.md)
+
+## شروع سریع
+
+1. بستهٔ `greflow-console-windows-amd64.zip` را دانلود و کامل استخراج کنید.
+2. در ویندوز `Start-GreFlow.ps1` را اجرا کنید؛ یا `greflow-console.exe` را در ترمینال اجرا کنید.
+3. `http://127.0.0.1:8787` را باز کنید و رمز پنل را تعیین کنید. نام پیش‌فرض `admin` است؛ کد راه‌اندازی و TOTP لازم نیست.
+4. IP و پسورد یا کلید SSH سرور را وارد کنید. پس از افزودن، ابزار مدیریت خودکار نصب و تانل‌های GreFlow شناسایی می‌شوند.
+
+برای لینوکس، بستهٔ amd64 یا arm64 را بگیرید و [راهنمای نصب سرویس](docs/console/RUN.fa.md#لینوکس-amd64-و-arm64) را دنبال کنید.
+پوشهٔ `helpers` باید کنار فایل اجرایی باقی بماند. فایل نصب مستقیماً از کنسول منتقل می‌شود؛ سرور به دانلود اینترنتی نیاز ندارد.
+
+## امکانات نسخهٔ اول
+
+| بخش | رفتار واقعی |
+| --- | --- |
+| سرورها | چند ایران و خارج، پسورد یا کلید SSH، نصب خودکار ابزار، شناسایی، اطلاعات سیستم، لاگ SSH و ری‌استارت سرور با تأیید جداگانه |
+| تانل‌ها | کارت و جدول، IP واضح خارج، پرچم، موقعیت و شبکه از Check-Host، نمایش مستقل سرویس، GRE و دسترسی مقصد |
+| عملیات | شروع، توقف، ری‌استارت، لاگ، ویرایش پورت‌ها و انتقال تک‌پورت TCP روی همان ورودی با تست و برگشت در شکست |
+| زمان‌بندی | اجرای timer روی خود ایران، پنجرهٔ نگهداری، سقف تلاش و بازیابی محدود |
+| دسترسی و بکاپ | مدیر/اپراتور/مشاهده‌گر، محدودهٔ سرورها، نشست‌ها و بکاپ رمزگذاری‌شده با فرمت `.greflow` |
+| گزارش‌ها | مراحل زنده، زمان، کد خطا، کد خروج، دانلود گزارش و نگهداری نتیجه‌ها |
+| رابط | فارسی، RTL، Vazirmatn محلی، حالت تاریک، چیدمان موبایل و دکمه‌های قابل استفاده با صفحه‌کلید |
+
+موقعیت Check-Host تقریبی است و مستقل از سلامت تانل نمایش داده می‌شود. نام ISP/Org الزاماً مالک فیزیکی دیتاسنتر نیست.
+تست TCP، دادهٔ قدیمی و نصب موفق ابزار **تأیید اتصال واقعی کانفیگ کلاینت نیستند**.
+
+کنسول کنار CLI فعلی v0.2.0 کار می‌کند؛ فایل‌ها و تنظیمات نصب‌شدهٔ موتور حفظ می‌شوند.
+نصب خودکار ابزار به root یا دسترسی از قبل مجاز sudo نیاز دارد؛ هیچ دسترسی sudo جدیدی ایجاد نمی‌کند.
+محدودیت‌های نسخهٔ اول، از جمله انتقال فقط روی یک ورودی، عدم پشتیبانی از بومی‌سازی nftables و نبود مانیتورینگ تاریخی منابع، در [وضعیت اعتبارسنجی](docs/console/TEST-RESULTS.md) آمده‌اند.
+
+## توسعه و ساخت
+
+Go 1.27.3 و Python 3.12+:
+
+```bash
+go test ./...
+go vet ./...
+python scripts/package-console.py
+```
+
+بسته‌ها در `dist` شامل باینری ویندوز x64، لینوکس amd64/arm64، ابزار هر دو معماری، راهنما، مجوزها، SBOM و SHA256 هستند.
+دارایی‌های پنل در `web/app` قرار دارند. `web/console` فقط مرجع طراحی و تست جداگانه است و وارد برنامهٔ اجرایی نمی‌شود.
+آزمون Linux CI در namespaceهای جدا، GRE و فوروارد پورت را با کرنل واقعی بررسی می‌کند. هیچ سرور کاربر برای آزمون مخرب استفاده نمی‌شود.
+
+## موتور و CLI
 
 [![CI](https://github.com/TIR3D4/GreFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/TIR3D4/GreFlow/actions/workflows/ci.yml)
 [راهنمای فارسی](docs/README.fa.md) · [Operations](docs/operations.md) · [Architecture](docs/architecture.md)
@@ -51,7 +102,7 @@ bash <(curl -fLsS https://raw.githubusercontent.com/TIR3D4/GreFlow/main/install.
 
 The installer downloads this repository's v0.2.0 release binary and verifies SHA256. Checksums detect download corruption; they are not independent release signatures. No third-party installer runs. The release becomes available after all CI checks pass. Installation does not start a tunnel or change firewall settings.
 
-Build from source instead (Go 1.22+):
+Build from source instead (Go 1.27.3):
 
 ```bash
 git clone https://github.com/TIR3D4/GreFlow.git

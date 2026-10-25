@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f5f3fa" />
+    <title>GreFlow — مدیریت تانل‌ها</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="domain.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a href="#main" class="skip">رفتن به محتوا</a>
+    <aside id="sidebar" class="sidebar" aria-label="ناوبری اصلی">
+      <a class="brand" href="#overview"
+        ><span class="brand-mark">G</span
+        ><b dir="ltr">GreFlow<span>مدیریت ارتباط سرورها</span></b></a
+      >
+      <nav id="navigation"></nav>
+      <div class="sidebar-bottom">
+        <span class="eyebrow">محیط فعلی</span><b>پیش‌نمایش محصول</b>
+        <p>داده‌ها نمایشی هستند.<br />فرمانی روی سرور اجرا نمی‌شود.</p>
+        <span class="version" dir="ltr">Console design • v0.1</span>
+      </div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="top-title">
+          <button
+            id="menu-toggle"
+            class="icon-button mobile-menu"
+            aria-label="باز کردن منو"
+            aria-expanded="false"
+          ></button
+          ><span id="breadcrumb">نمای کلی</span>
+        </div>
+        <div class="top-actions">
+          <span class="demo-pill">نسخهٔ نمایشی</span
+          ><button
+            id="theme-toggle"
+            class="icon-button"
+            aria-label="تغییر به حالت تاریک"
+          ></button
+          ><button
+            id="alerts-button"
+            class="icon-button"
+            aria-label="مشاهده هشدارها"
+          ></button
+          ><span class="avatar" aria-label="مدیر نمونه">م</span>
+        </div>
+      </header>
+      <main id="main" tabindex="-1"></main>
+      <footer class="app-footer">
+        GreFlow Console <span>حالت نمایشی · بدون اتصال به سرور</span>
+      </footer>
+    </div>
+    <div id="modal-root"></div>
+    <div id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

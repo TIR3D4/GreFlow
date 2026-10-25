@@ -64,6 +64,9 @@ GRE is unencrypted. Ports on exit must be allowed with add as well.`)
 		return fmt.Errorf("run with sudo/root")
 	}
 	m := manager.Manager{Root: os.Getenv("GREFLOW_ROOT"), Name: name, R: system.Exec{}}
+	if len(args) == 2 && args[1] == "--json" {
+		return structured(m, args[0])
+	}
 	// systemctl restart/stop invoke this binary: do not hold our lock across them.
 	if args[0] == "restart" {
 		if len(args) != 1 {

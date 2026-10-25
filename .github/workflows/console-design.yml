@@ -1,0 +1,23 @@
+name: Console design checks
+on:
+  push:
+    paths: ['web/console/**', '.github/workflows/console-design.yml']
+  pull_request:
+    paths: ['web/console/**', '.github/workflows/console-design.yml']
+permissions:
+  contents: read
+jobs:
+  reference:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check web/console/app.js
+      - run: node --check web/console/serve.cjs
+      - run: node --test web/console/domain.test.cjs
