@@ -1,4 +1,8 @@
-# Handoff verification — 2026-10-25
+# Historical design-handoff verification — 2026-10-25
+
+This records the supplied reference stage only. For the implemented Console 1.0,
+see [current validation evidence](TEST-RESULTS.md); the old environment limitations
+and publication status below are not the current project status.
 
 Scope: the HTML/CSS/JavaScript design reference and documentation. This is not evidence for a production backend or live server changes.
 
