@@ -2119,3 +2119,35 @@ dialog::backdrop {
     animation: none;
   }
 }
+
+.evidence {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.evidence > small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.8;
+  max-width: 220px;
+}
+.chip.neutral {
+  background: var(--surface2);
+  color: var(--muted);
+}
+.port-evidence {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 11px;
+}
+.geo-source {
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+}

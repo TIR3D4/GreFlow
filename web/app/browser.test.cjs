@@ -374,6 +374,24 @@ test("production binary: bootstrap, login, RBAC, real empty states, forms and re
   }
   await page.keyboard.press("Escape");
   await page.locator(".server-tools summary").click();
+  await page.locator(".server-tools").evaluate((el) => {
+    el.dataset.pollMarker = "before";
+  });
+  await page
+    .locator(".server-tools:not([data-poll-marker])")
+    .waitFor({ timeout: 20000 });
+  assert.equal(
+    await page.locator(".server-tools").evaluate((el) => el.open),
+    true,
+    "polling preserves open server tools",
+  );
+  assert.equal(
+    await page
+      .locator(".server-tools summary")
+      .evaluate((el) => el === document.activeElement),
+    true,
+    "polling preserves keyboard focus",
+  );
   await page
     .getByRole("button", { name: "ری‌استارت سرور", exact: true })
     .click();
@@ -408,7 +426,7 @@ test("production binary: bootstrap, login, RBAC, real empty states, forms and re
   assert.equal(
     (await page
       .locator(".tunnel-card")
-      .getByText("دادهٔ قدیمی", { exact: true })
+      .getByText("نیاز به بررسی", { exact: true })
       .count()) > 0,
     true,
   );
@@ -442,6 +460,19 @@ test("production binary: bootstrap, login, RBAC, real empty states, forms and re
   await page.keyboard.press("Escape");
   await page.goto("http://127.0.0.1:18788/#ports");
   await page.locator("tbody tr").first().waitFor();
+  await page
+    .locator("tbody tr")
+    .first()
+    .getByText("هنوز ثبت نشده", { exact: true })
+    .waitFor();
+  await page
+    .locator("tbody tr")
+    .first()
+    .getByRole("button", { name: "بررسی اتصال", exact: true })
+    .waitFor();
+  await page
+    .getByRole("columnheader", { name: "هدایت پورت", exact: true })
+    .waitFor();
   await page.setViewportSize({ width: 390, height: 950 });
   assert.equal(
     await page.evaluate(

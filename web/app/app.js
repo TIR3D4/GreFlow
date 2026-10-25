@@ -41,7 +41,7 @@ const labels = {
   failed: "ناموفق",
   unknown: "نامشخص",
   unsupported: "نیازمند تست برنامه",
-  stale: "دادهٔ قدیمی",
+  stale: "نیاز به بررسی",
   healthy: "در دسترس",
   degraded: "اختلال پینگ",
   down: "نیازمند بررسی",
@@ -55,7 +55,7 @@ const labels = {
 const btn = (label, action, id = "", primary = false) =>
   `<button type="button" class="btn ${primary ? "primary" : ""}" data-action="${action}" data-id="${esc(id)}">${label}</button>`;
 const badge = (s, label) =>
-  `<span class="chip ${["ok", "healthy", "succeeded"].includes(s) ? "green" : ["failed", "down", "rollback_failed"].includes(s) ? "red" : "amber"}">${icon(["ok", "healthy", "succeeded"].includes(s) ? "check" : "warning")}${esc(label || labels[s] || s)}</span>`;
+  `<span class="chip ${["ok", "healthy", "succeeded"].includes(s) ? "green" : ["failed", "down", "rollback_failed"].includes(s) ? "red" : ["unknown", "stale", "unsupported"].includes(s) ? "neutral" : "amber"}">${icon(["ok", "healthy", "succeeded"].includes(s) ? "check" : ["unknown", "stale", "unsupported"].includes(s) ? "schedules" : "warning")}${esc(label || labels[s] || s)}</span>`;
 const time = (v) =>
   v
     ? new Date(v).toLocaleString("fa-IR", {
@@ -164,6 +164,10 @@ function modal(title, body, footer = "") {
   $("#modal-root").innerHTML =
     `<dialog aria-labelledby="modal-title"><div class="modal-header"><h2 id="modal-title">${esc(title)}</h2><button class="icon-button" data-action="close" aria-label="بستن">${icon("close")}</button></div><div class="modal-body">${body}<p id="form-error" class="form-error" role="alert"></p></div>${footer ? `<div class="modal-footer">${footer}</div>` : ""}</dialog>`;
   const d = $("dialog");
+  d.addEventListener("cancel", (e) => {
+    e.preventDefault();
+    close();
+  });
   d.addEventListener("close", () => {
     if (returnFocus?.isConnected) returnFocus.focus();
   });
@@ -262,13 +266,17 @@ function login(bootstrap) {
 }
 function check(t, kind) {
   const e = t.checks?.find((v) => v.kind === kind);
-  if (!e) return "unknown";
+  if (!e || e.status === "unknown") return "unknown";
+  if (e.status === "unsupported") return "unsupported";
   return new Date(e.expires_at) < new Date() ? "stale" : e.status;
 }
 function state(t) {
   if (
     t.checks?.some(
-      (e) => e.kind !== "user_verified" && new Date(e.expires_at) < new Date(),
+      (e) =>
+        e.kind !== "user_verified" &&
+        ["ok", "failed"].includes(e.status) &&
+        new Date(e.expires_at) < new Date(),
     )
   )
     return "stale";
@@ -313,16 +321,51 @@ const getTunnel = (id) =>
       })),
     )
     .find((t) => t.id === id);
+function evidenceLabel(kind, status) {
+  if (kind === "user_verified")
+    return (
+      {
+        ok: "تأیید کلاینت ثبت شد",
+        stale: "تأیید قبلی",
+        unknown: "هنوز ثبت نشده",
+      }[status] || labels[status]
+    );
+  if (status === "stale") return "نیاز به بررسی";
+  if (status === "unknown") return "بررسی نشده";
+  if (status === "unsupported") return "نیاز به تست برنامه";
+  if (kind === "rules") return status === "ok" ? "برقرار" : "نیاز به اصلاح";
+  if (kind === "service") return status === "ok" ? "فعال" : "غیرفعال";
+  if (kind === "gre_peer") return status === "ok" ? "پاسخ می‌دهد" : "بدون پاسخ";
+  return status === "ok" ? "در دسترس" : "بدون دسترسی";
+}
+function evidenceMarkup(t, kind, compact = false) {
+  const e = t.checks?.find((v) => v.kind === kind),
+    status = check(t, kind);
+  let note = "";
+  if (kind === "user_verified")
+    note =
+      status === "unknown"
+        ? "پس از تست واقعی برنامه ثبت کنید"
+        : `زمان تأیید: ${time(e?.observed_at)}؛ تضمین اتصال فعلی نیست`;
+  else if (status === "unknown") note = "بررسی اتصال را اجرا کنید";
+  else if (status === "unsupported")
+    note = "این مسیر به تست UDP یا برنامه نیاز دارد";
+  else if (e)
+    note = `${status === "stale" ? "آخرین نتیجه: " + evidenceLabel(kind, e.status) + " · " : "بررسی: "}${time(e.observed_at)}`;
+  return `<span class="evidence" title="${esc(note)}">${badge(status, evidenceLabel(kind, status))}${compact ? "" : `<small>${esc(note)}</small>`}</span>`;
+}
 function layers(t) {
   return `<div class="health-grid">${[
-    ["service", "سرویس"],
-    ["gre_peer", "ارتباط GRE"],
-    ["rules", "قوانین"],
+    ["service", "سرویس تانل"],
+    ["gre_peer", "پاسخ GRE"],
+    ["rules", "هدایت پورت"],
   ]
-    .map(([k, l]) => `<div><small>${l}</small>${badge(check(t, k))}</div>`)
+    .map(
+      ([k, l]) => `<div><small>${l}</small>${evidenceMarkup(t, k, true)}</div>`,
+    )
     .join(
       "",
-    )}</div><div class="tag-line">${(t.desired.forwards || []).map((f) => badge(check(t, "destination:" + f.protocol + ":" + f.public), `${f.protocol.toUpperCase()} ${f.public}: ${labels[check(t, "destination:" + f.protocol + ":" + f.public)]}`)).join("")}</div>`;
+    )}</div><div class="tag-line">${(t.desired.forwards || []).map((f) => `<span class="port-evidence"><bdi>${esc(f.protocol.toUpperCase() + " " + f.public + " → " + f.destination)}</bdi>${evidenceMarkup(t, "destination:" + f.protocol + ":" + f.public, true)}</span>`).join("")}</div>`;
 }
 const ipInfoCache = new Map(),
   ipInfoPending = new Set();
@@ -343,7 +386,7 @@ function geoMarkup(ip) {
         cc.toUpperCase(),
       );
   } catch {}
-  return `<div class="geo-place">${cc ? `<img src="/assets/flags/${cc}.svg" class="country-flag" alt="پرچم ${esc(country)}" width="32" height="24">` : ""}<b>${esc(country)}</b><span>${esc(g.city || g.region || "شهر نامشخص")}</span>${g.status === "stale" ? badge("stale") : ""}</div><small class="geo-provider">شبکه / دیتاسنتر: <bdi>${esc(g.organization || "نامشخص")}</bdi>${g.asn ? ` · <bdi>${esc(g.asn)}</bdi>` : ""}</small><details class="geo-source"><summary>منبع و زمان بررسی</summary><small>${esc(g.source)} · ${time(g.observed_at)}<br>موقعیت IP تقریبی است؛ نام شبکه الزاماً مالک فیزیکی دیتاسنتر نیست.${g.country_conflict ? " پایگاه‌های Check-Host دربارهٔ کشور اختلاف دارند." : ""}${g.error ? `<br>${esc(g.error)}` : ""}</small></details>`;
+  return `<div class="geo-place">${cc ? `<img src="/assets/flags/${cc}.svg" class="country-flag" alt="پرچم ${esc(country)}" width="32" height="24">` : ""}<b>${esc(country)}</b><span>${esc(g.city || g.region || "شهر نامشخص")}</span>${g.status === "stale" ? badge("stale", "اطلاعات قدیمی") : ""}</div><small class="geo-provider">شبکه / دیتاسنتر: <bdi>${esc(g.organization || "نامشخص")}</bdi>${g.asn ? ` · <bdi>${esc(g.asn)}</bdi>` : ""}</small><details class="geo-source" data-disclosure="geo:${esc(ip)}"><summary>منبع و زمان بررسی</summary><small>${esc(g.source)} · ${time(g.observed_at)}<br>موقعیت IP تقریبی است؛ نام شبکه الزاماً مالک فیزیکی دیتاسنتر نیست.${g.country_conflict ? " پایگاه‌های Check-Host دربارهٔ کشور اختلاف دارند." : ""}${g.error ? `<br>${esc(g.error)}` : ""}</small></details>`;
 }
 function geoBlock(t) {
   return `<div class="geo-block" data-geo-ip="${esc(outsideIP(t))}">${geoMarkup(outsideIP(t))}</div>`;
@@ -429,7 +472,7 @@ function hostCard(h) {
   const admin = user.role === "admin",
     ssh = h.hostname !== "agent",
     ready = !!h.inventory;
-  return `<article class="server-card"><div class="card-top"><h3>${esc(h.name)}</h3><span class="chip blue">${h.kind === "iran" ? "ایران" : "خارج"} · ${ssh ? "SSH" : "mTLS"}</span></div><p class="mono">${ssh ? esc(h.hostname) + ":" + h.port : "عامل خروجی"}</p><div class="server-summary"><b>${ready ? h.inventory.tunnels.length.toLocaleString("fa-IR") + " تانل شناسایی‌شده" : "نیازمند آماده‌سازی"}</b><small>آخرین شناسایی: ${time(h.observed_at)}</small></div>${h.last_error ? `<p class="form-error" role="alert">${esc(h.last_error)}</p>` : ""}${busy ? `<p class="server-progress" role="status">${esc(busy.result?.diagnostics?.at(-1)?.message || "عملیات در صف است…")}</p>` : ""}<div class="card-footer">${!ready && admin && ssh && !busy ? btn("آماده‌سازی خودکار", "prepare", h.id, true) : btn("مدیریت تانل‌ها", "host", h.id, true)}${user.role !== "viewer" && !busy ? btn("شناسایی فقط‌خواندنی", "discover", h.id) : ""}${latest ? btn(busy ? "مشاهدهٔ پیشرفت" : "گزارش اتصال و عملیات", "operation", (busy || latest).id) : ""}</div><details class="server-tools"><summary>ابزارها و جزئیات سرور</summary><div class="actions">${ssh && user.role !== "viewer" ? btn("اطلاعات سیستم", "server_info", h.id) + btn("لاگ SSH", "server_logs", h.id) : ""}${admin && ssh ? btn("بررسی و آماده‌سازی ابزار", "prepare", h.id) + btn("تغییر دسترسی SSH", "credentials", h.id) + `<button class="btn danger" data-action="server-reboot" data-id="${esc(h.id)}">ری‌استارت سرور</button>` : ""}</div>${h.addresses?.length ? `<p class="compact-note">آدرس‌های شناسایی‌شده</p><div class="tag-line">${h.addresses.map((v) => `<span class="chip mono">${esc(v)}</span>`).join("")}</div>` : ""}</details></article>`;
+  return `<article class="server-card"><div class="card-top"><h3>${esc(h.name)}</h3><span class="chip blue">${h.kind === "iran" ? "ایران" : "خارج"} · ${ssh ? "SSH" : "mTLS"}</span></div><p class="mono">${ssh ? esc(h.hostname) + ":" + h.port : "عامل خروجی"}</p><div class="server-summary"><b>${ready ? h.inventory.tunnels.length.toLocaleString("fa-IR") + " تانل شناسایی‌شده" : "نیازمند آماده‌سازی"}</b><small>آخرین شناسایی: ${time(h.observed_at)}</small></div>${h.last_error ? `<p class="form-error" role="alert">${esc(h.last_error)}</p>` : ""}${busy ? `<p class="server-progress" role="status">${esc(busy.result?.diagnostics?.at(-1)?.message || "عملیات در صف است…")}</p>` : ""}<div class="card-footer">${!ready && admin && ssh && !busy ? btn("آماده‌سازی خودکار", "prepare", h.id, true) : btn("مدیریت تانل‌ها", "host", h.id, true)}${user.role !== "viewer" && !busy ? btn("شناسایی فقط‌خواندنی", "discover", h.id) : ""}${latest ? btn(busy ? "مشاهدهٔ پیشرفت" : "گزارش اتصال و عملیات", "operation", (busy || latest).id) : ""}</div><details class="server-tools" data-disclosure="host:${esc(h.id)}"><summary>ابزارها و جزئیات سرور</summary><div class="actions">${ssh && user.role !== "viewer" ? btn("اطلاعات سیستم", "server_info", h.id) + btn("لاگ SSH", "server_logs", h.id) : ""}${admin && ssh ? btn("بررسی و آماده‌سازی ابزار", "prepare", h.id) + btn("تغییر دسترسی SSH", "credentials", h.id) + `<button class="btn danger" data-action="server-reboot" data-id="${esc(h.id)}">ری‌استارت سرور</button>` : ""}</div>${h.addresses?.length ? `<p class="compact-note">آدرس‌های شناسایی‌شده</p><div class="tag-line">${h.addresses.map((v) => `<span class="chip mono">${esc(v)}</span>`).join("")}</div>` : ""}</details></article>`;
 }
 function tunnelPage() {
   return (
@@ -475,11 +518,12 @@ function portsPage() {
   return (
     heading(
       "مسیر پورت‌ها",
-      "قانون مشاهده‌شده، تست GRE، تست مقصد و تأیید کاربر مستقل هستند.",
-      hostPicker(),
+      "هدایت پورت یعنی تنظیم فایروال؛ تست مقصد فقط باز بودن پورت خارج را می‌سنجد. تست واقعی برنامه را خودتان تأیید می‌کنید.",
+      hostPicker() +
+        (user.role === "admin" ? btn("پایش خودکار", "monitor") : ""),
     ) +
     (rows.length
-      ? `<div class="table-wrap"><table><thead><tr><th>ایران</th><th>ورودی</th><th>تانل / خارج</th><th>مقصد</th><th>قانون</th><th>تست مقصد</th><th>تأیید کاربر</th><th>عملیات</th></tr></thead><tbody>${rows.map(({ t, f }) => `<tr><td class="mono">${esc(t.desired.local)}</td><td class="mono">${esc(f.protocol)} ${esc(f.public)}</td><td><b class="mono">${esc(t.name || "default")}</b><p class="mono">${esc(t.desired.remote)}</p></td><td class="mono">${esc(f.destination)}</td><td>${badge(check(t, "rules"))}</td><td>${badge(check(t, `destination:${f.protocol}:${f.public}`))}</td><td>${badge(check(t, "user_verified"))}</td><td>${user.role === "viewer" ? "—" : btn("انتقال", "transfer", `${t.id}|${f.protocol}|${f.public}`)}</td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="table-wrap"><table><thead><tr><th>ایران</th><th>ورودی</th><th>تانل / خارج</th><th>مقصد</th><th>هدایت پورت</th><th>دسترسی مقصد</th><th>تست واقعی کلاینت</th><th>عملیات</th></tr></thead><tbody>${rows.map(({ t, f }) => `<tr><td class="mono">${esc(t.desired.local)}</td><td class="mono">${esc(f.protocol)} ${esc(f.public)}</td><td><b class="mono">${esc(t.name || "default")}</b><p class="mono">${esc(t.desired.remote)}</p></td><td class="mono">${esc(f.destination)}</td><td>${evidenceMarkup(t, "rules")}</td><td>${evidenceMarkup(t, `destination:${f.protocol}:${f.public}`)}</td><td>${evidenceMarkup(t, "user_verified")}</td><td>${btn("جزئیات", "detail", t.id)}${user.role === "viewer" ? "" : btn("بررسی اتصال", "probe", t.id) + btn("انتقال", "transfer", `${t.id}|${f.protocol}|${f.public}`)}</td></tr>`).join("")}</tbody></table></div>`
       : empty(
           "پورتی ثبت نشده",
           "پس از شناسایی یا افزودن تانل، مسیرها اینجا نمایش داده می‌شوند.",
@@ -595,12 +639,33 @@ function settingsPage() {
         ["dark", "تاریک"],
       ],
       localStorage.getItem("greflow-theme") || "system",
-    )}${field("timezone", "منطقهٔ زمانی", localStorage.getItem("greflow-timezone") || "Asia/Tehran")}</div>${btn("اعمال تنظیمات نمایش", "preferences")}</section><section class="panel"><h2>ورود و دسترسی</h2><p class="help">رمز پنل، نشست‌های فعال و دسترسی کاربران.</p><div class="actions">${btn("نشست‌های من", "sessions")}${btn("تغییر رمز عبور", "password")}${btn("لغو همهٔ نشست‌های من", "revoke")}</div>${user.role === "admin" ? btn("مدیریت کاربران", "users") : ""}</section>${user.role === "admin" ? `<section class="panel"><h2>پشتیبان مدیریت</h2><p class="help">فایل اختصاصی GreFlow شامل تنظیمات، سرورها، دسترسی‌ها و تاریخچه است. فقط همین پروژه آن را می‌خواند؛ کل فایل با رمز بکاپ محافظت می‌شود.</p><div class="actions">${btn("ساخت بکاپ", "backup")}${btn("پیش‌نمایش بازیابی", "restore")}${btn("تاریخچهٔ دسترسی", "audit")}</div></section><section class="panel"><h2>هشدار تلگرام</h2><p class="help">صف اعلان با جلوگیری از تکرار، تلاش مجدد و پیام بازیابی. ارسال مرکزی فقط تا وقتی برنامهٔ پنل روشن است ادامه دارد.</p>${btn("تنظیم مقصد", "notifications")}${btn("پایش و نگهداری تاریخچه", "monitor")}${btn("عامل‌ها و لغو دسترسی", "agents")}</section>` : ""}<section class="panel"><h2>دربارهٔ این ساخت</h2><p>رابط مشترک ویندوز و لینوکس · موتور GRE نسخهٔ ۰٫۲</p><p>عامل خروجی mTLS: ${esc(capabilities.push_agent_reason || "در دسترس نیست")}</p><p class="compact-note">این ساخت در مرحلهٔ اعتبارسنجی است؛ دروازه‌های انتشار در مستندات ثبت شده‌اند.</p></section></div>`
+    )}${field("timezone", "منطقهٔ زمانی", localStorage.getItem("greflow-timezone") || "Asia/Tehran")}</div>${btn("اعمال تنظیمات نمایش", "preferences")}</section><section class="panel"><h2>ورود و دسترسی</h2><p class="help">رمز پنل، نشست‌های فعال و دسترسی کاربران.</p><div class="actions">${btn("نشست‌های من", "sessions")}${btn("تغییر رمز عبور", "password")}${btn("لغو همهٔ نشست‌های من", "revoke")}</div>${user.role === "admin" ? btn("مدیریت کاربران", "users") : ""}</section>${user.role === "admin" ? `<section class="panel"><h2>پشتیبان مدیریت</h2><p class="help">فایل اختصاصی GreFlow شامل تنظیمات، سرورها، دسترسی‌ها و تاریخچه است. فقط همین پروژه آن را می‌خواند؛ کل فایل با رمز بکاپ محافظت می‌شود.</p><div class="actions">${btn("ساخت بکاپ", "backup")}${btn("پیش‌نمایش بازیابی", "restore")}${btn("تاریخچهٔ دسترسی", "audit")}</div></section><section class="panel"><h2>هشدار تلگرام</h2><p class="help">صف اعلان با جلوگیری از تکرار، تلاش مجدد و پیام بازیابی. ارسال مرکزی فقط تا وقتی برنامهٔ پنل روشن است ادامه دارد.</p>${btn("تنظیم مقصد", "notifications")}${btn("پایش و نگهداری تاریخچه", "monitor")}${btn("عامل‌ها و لغو دسترسی", "agents")}</section>` : ""}<section class="panel"><h2>دربارهٔ این ساخت</h2><p>رابط مشترک ویندوز و لینوکس · موتور GRE نسخهٔ ۰٫۲</p><p>عامل خروجی mTLS: ${esc(capabilities.push_agent_reason || "در دسترس نیست")}</p><p class="compact-note">نسخهٔ کنسول: <bdi>${esc(capabilities.build || "dev")}</bdi> · دامنهٔ تست‌ها و محدودیت‌ها در راهنمای همراه بسته ثبت شده‌اند.</p></section></div>`
   );
 }
+let renderedPage = "";
 function render() {
   if (!user) return;
   const p = page();
+  const samePage = renderedPage === p;
+  const opened = new Set(
+    samePage
+      ? [
+          ...document.querySelectorAll("#main details[open][data-disclosure]"),
+        ].map((el) => el.dataset.disclosure)
+      : [],
+  );
+  const active = document.activeElement;
+  let focusSelector = "";
+  if (samePage && active?.closest("#main")) {
+    if (active.id) focusSelector = `#${CSS.escape(active.id)}`;
+    else if (active.dataset.action)
+      focusSelector = `[data-action="${CSS.escape(active.dataset.action)}"][data-id="${CSS.escape(active.dataset.id || "")}"]`;
+    else if (
+      active.tagName === "SUMMARY" &&
+      active.parentElement.dataset.disclosure
+    )
+      focusSelector = `[data-disclosure="${CSS.escape(active.parentElement.dataset.disclosure)}"] > summary`;
+  }
   $("#navigation").innerHTML = nav
     .map(
       ([k, l]) =>
@@ -628,6 +693,12 @@ function render() {
   };
   $("#main").innerHTML = (views[p] || overview)();
   renderResults();
+  document.querySelectorAll("#main details[data-disclosure]").forEach((el) => {
+    el.open = opened.has(el.dataset.disclosure);
+  });
+  if (focusSelector)
+    $("#main").querySelector(focusSelector)?.focus({ preventScroll: true });
+  renderedPage = p;
 }
 async function refresh() {
   if (refreshing || !user) return;
@@ -639,7 +710,14 @@ async function refresh() {
       api("schedules"),
     ]);
     notice("");
-    if (!$("dialog") && document.activeElement?.tagName !== "INPUT") render();
+    if (
+      !$("dialog") &&
+      !["INPUT", "SELECT", "TEXTAREA"].includes(
+        document.activeElement?.tagName,
+      ) &&
+      (page() !== "settings" || !$("#main").children.length)
+    )
+      render();
     const report = $("#operation-report");
     if (report) {
       const operation = operations.find(
@@ -688,7 +766,7 @@ function detail(id) {
   loadIPInfo([t]);
   modal(
     `جزئیات ${t.name || "default"} · ${outsideIP(t)}`,
-    `<div class="endpoint-heading"><div><small>سرور خارج</small><h3 class="mono">${esc(outsideIP(t))}</h3></div>${btn("کپی IP", "copy-ip", outsideIP(t))}</div>${geoBlock(t)}<div class="card-links">${checkHostLink(t)}</div>${layers(t)}<p class="notice">تست TCP فقط باز بودن مقصد را می‌سنجد. تأیید واقعی کانفیگ به تست کلاینت نیاز دارد.</p><div class="list-row"><b>تأیید کاربر</b>${badge(check(t, "user_verified"))}</div><div class="list-row"><b>اختلاف ذخیره و اعمال</b>${badge(t.drift ? "failed" : "ok", t.drift ? "اختلاف مشاهده شد" : "یکسان")}</div><div class="actions">${user.role === "viewer" ? "" : ["start", "stop", "restart", "mappings", "schedule", "verify"].map((a) => btn({ start: "شروع", stop: "توقف", restart: "ری‌استارت", mappings: "ویرایش پورت‌ها", schedule: "زمان‌بندی", verify: "ثبت تأیید کلاینت" }[a], a, t.id)).join("")}${btn("لاگ واقعی", "logs", t.id)}</div><details><summary>پیکربندی ذخیره‌شده و اعمال‌شده</summary><pre class="code-box">${esc(JSON.stringify({ desired: t.desired, applied: t.applied, revision: t.revision }, null, 2))}</pre></details>${user.role === "admin" ? btn("حذف تانل", "remove", t.id) : ""}`,
+    `<div class="endpoint-heading"><div><small>سرور خارج</small><h3 class="mono">${esc(outsideIP(t))}</h3></div>${btn("کپی IP", "copy-ip", outsideIP(t))}</div>${geoBlock(t)}<div class="card-links">${checkHostLink(t)}</div>${layers(t)}<p class="notice">تست TCP فقط باز بودن مقصد را می‌سنجد. تأیید واقعی کانفیگ به تست کلاینت نیاز دارد.</p><div class="list-row"><b>تست واقعی کلاینت</b>${evidenceMarkup(t, "user_verified")}</div><div class="list-row"><b>اختلاف ذخیره و اعمال</b>${badge(t.drift ? "failed" : "ok", t.drift ? "اختلاف مشاهده شد" : "یکسان")}</div><div class="actions">${user.role === "viewer" ? "" : ["start", "stop", "restart", "mappings", "schedule", "verify"].map((a) => btn({ start: "شروع", stop: "توقف", restart: "ری‌استارت", mappings: "ویرایش پورت‌ها", schedule: "زمان‌بندی", verify: "ثبت تأیید کلاینت" }[a], a, t.id)).join("")}${btn("لاگ واقعی", "logs", t.id)}</div><details><summary>پیکربندی ذخیره‌شده و اعمال‌شده</summary><pre class="code-box">${esc(JSON.stringify({ desired: t.desired, applied: t.applied, revision: t.revision }, null, 2))}</pre></details>${user.role === "admin" ? btn("حذف تانل", "remove", t.id) : ""}`,
   );
 }
 function sshCredentialFields(method = "password") {

@@ -51,6 +51,13 @@ The workflow runs Go tests/vet on Windows and Ubuntu 24.04, Linux race tests,
 real browser tests on both platforms and isolated Linux network-namespace integration
 for GRE, TCP/UDP forwarding and transfer/rollback. It builds Windows amd64 and Linux
 amd64/arm64 bundles. A failed gate blocks automatic publication.
+The initial release implementation passed all Windows/Linux console jobs and the
+CLI kernel suite in [PR #1](https://github.com/TIR3D4/GreFlow/pull/1), including
+[console run 40162800933](https://github.com/TIR3D4/GreFlow/actions/runs/40162800933).
+Later UI refinements must pass those gates again on their own commit.
+Browser regressions also cover preserving expanded server tools/keyboard focus during
+polling, Escape cleanup and distinguishing never-run checks from expired results.
+
 Cross-compilation alone is not Linux runtime evidence. The workstation has no Linux
 kernel/WSL/Docker daemon; use the linked CI run to establish Linux gate results.
 

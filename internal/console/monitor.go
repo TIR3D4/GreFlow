@@ -119,7 +119,7 @@ func incidentState(t protocol.Tunnel) string {
 		if e.Kind == "user_verified" {
 			continue
 		}
-		if time.Now().After(e.ExpiresAt) {
+		if (e.Status == "ok" || e.Status == "failed") && time.Now().After(e.ExpiresAt) {
 			return "stale"
 		}
 		if e.Kind == "gre_peer" {
