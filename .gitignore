@@ -2,3 +2,9 @@
 /greflow
 *.test
 coverage.out
+/.tools/
+/data/
+/test-results/
+/node_modules/
+/keys/
+package-lock.json

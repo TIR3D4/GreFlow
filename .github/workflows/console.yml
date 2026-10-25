@@ -1,0 +1,79 @@
+name: Console CI and release
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: go test ./...
+      - run: go vet ./...
+      - if: runner.os == 'Linux'
+        run: test -z "$(gofmt -l cmd core firewall internal web/app)"
+      - if: runner.os == 'Linux'
+        run: go test -race ./...
+      - run: node --test web/console/domain.test.cjs
+      - run: npm install --no-save playwright@1.62.1
+      - run: npx playwright install --with-deps chromium
+      - run: python scripts/package-console.py
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:GREFLOW_CONSOLE_BINARY="$pwd/dist/greflow-console-windows-amd64/greflow-console.exe"
+          $env:GREFLOW_BROWSER_CHANNEL='chromium'
+          node --test web/app/browser.test.cjs
+      - if: runner.os == 'Linux'
+        run: |
+          GREFLOW_CONSOLE_BINARY=./dist/greflow-console-linux-amd64/greflow-console GREFLOW_BROWSER_CHANNEL=chromium node --test web/app/browser.test.cjs
+          sudo apt-get update
+          sudo apt-get install -y iproute2 iptables iputils-ping conntrack
+          sudo modprobe ip_gre
+          sudo bash tests/integration.sh ./dist/greflow-console-linux-amd64/greflow ./dist/greflow-console-linux-amd64/greflow-agent
+      - uses: actions/upload-artifact@v4
+        with:
+          name: console-validation-${{ runner.os }}
+          path: |
+            dist/greflow-console-*.zip
+            dist/greflow-console-*.tar.gz
+            dist/CONSOLE-SHA256SUMS
+            dist/sbom.cdx.json
+            test-results/
+  release:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: console-validation-Linux
+          path: release-assets
+      - name: Publish validated console bundles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(tr -d '\r\n' < CONSOLE_VERSION)
+          tag="console-v$version"
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [[ "$latest" != "$GITHUB_SHA" ]]; then
+            echo 'Newer main exists; do not publish stale source.'
+          elif gh release view "$tag" >/dev/null 2>&1; then
+            echo 'Existing release is immutable; no assets overwritten.'
+          else
+            gh release create "$tag" release-assets/dist/greflow-console-*.zip release-assets/dist/greflow-console-*.tar.gz release-assets/dist/CONSOLE-SHA256SUMS release-assets/dist/sbom.cdx.json --target "$GITHUB_SHA" --title "GreFlow Console $version" --notes-file "docs/releases/console-v$version.md"
+          fi

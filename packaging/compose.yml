@@ -1,0 +1,12 @@
+services:
+  console:
+    build:
+      context: ..
+      dockerfile: packaging/Dockerfile
+    command: ["--data", "/data", "--key-file", "/keys/master.key", "--listen", "0.0.0.0:8787", "--origin", "${GREFLOW_ORIGIN:?Set the exact public HTTPS origin}"]
+    ports: ["127.0.0.1:8787:8787"]
+    volumes: ["../data:/data", "../keys:/keys"]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]

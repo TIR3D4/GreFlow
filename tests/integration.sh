@@ -3,6 +3,8 @@
 set -euo pipefail
 [[ ${EUID} -eq 0 ]] || { echo 'Root required'; exit 1; }
 binary=$(realpath "${1:-./dist/greflow-linux-amd64}")
+agent=""
+if [[ -n ${2:-} ]]; then agent=$(realpath "$2"); fi
 work=$(mktemp -d)
 suffix=$$
 entry="gf-entry-$suffix"
@@ -163,6 +165,55 @@ wait "$first"
 wait "$second"
 probe
 probe2
+# Optional console dispatcher gate: same Linux namespaces, no real host.
+if [[ -n $agent ]]; then
+    dispatch() { ip netns exec "$entry" env GREFLOW_ROOT="$work/$entry" "$agent" dispatch; }
+    gf "$entry" status --json > "$work/source-health.json"
+    gf "$entry" --tunnel exit2 status --json > "$work/target-health.json"
+    python3 - "$work" <<'PYTHON'
+import json, pathlib, sys, uuid
+p=pathlib.Path(sys.argv[1]);source=json.loads((p/'source-health.json').read_text());target=json.loads((p/'target-health.json').read_text())
+request={'version':1,'id':uuid.uuid4().hex,'action':'transfer','name':'','revision':source['revision'],'target':'exit2','target_revision':target['revision'],'forward':{'protocol':'tcp','public':'443','destination':'2020'},'destination':'65000'}
+(p/'preflight-fail.json').write_text(json.dumps(request))
+request['id']=uuid.uuid4().hex;request['destination']='2020';(p/'transfer.json').write_text(json.dumps(request))
+PYTHON
+    touch "$work/keep-traffic"
+    ip netns exec "$client" python3 - "$work/keep-traffic" <<'PYTHON' &
+import pathlib,socket,sys,time
+flag=pathlib.Path(sys.argv[1]);completed=0
+while flag.exists():
+    with socket.create_connection(('192.0.2.1',8443),timeout=3) as s:
+        s.sendall(b'unrelated-live-2020');assert s.recv(1024)==b'unrelated-live-2020'
+    completed+=1;time.sleep(.02)
+assert completed>0
+PYTHON
+    traffic_pid=$!
+    pids+=("$traffic_pid")
+    before_source=$(ip -n "$entry" -o link show greflow0 | cut -d: -f1)
+    before_target=$(ip -n "$entry" -o link show gf-exit2 | cut -d: -f1)
+    dispatch < "$work/preflight-fail.json" > "$work/preflight-result.json"
+    python3 - "$work/preflight-result.json" <<'PYTHON'
+import json,sys
+v=json.load(open(sys.argv[1]));assert v['state']=='failed' and 'PREFLIGHT_FAILED' in v['error'],v
+PYTHON
+    probe
+    dispatch < "$work/transfer.json" > "$work/transfer-result.json"
+    python3 - "$work/transfer-result.json" <<'PYTHON'
+import json,sys
+v=json.load(open(sys.argv[1]));assert v['state']=='succeeded',v
+PYTHON
+    [[ $(ip -n "$entry" -o link show greflow0 | cut -d: -f1) == "$before_source" ]]
+    [[ $(ip -n "$entry" -o link show gf-exit2 | cut -d: -f1) == "$before_target" ]]
+    probe
+    probe2
+    # Duplicate delivery returns the durable outcome rather than transferring twice.
+    dispatch < "$work/transfer.json" > "$work/transfer-replay.json"
+    cmp "$work/transfer-result.json" "$work/transfer-replay.json"
+    rm "$work/keep-traffic"
+    wait "$traffic_pid"
+    gf "$entry" --tunnel exit2 remove tcp 443
+    gf "$entry" add tcp 443 2020
+fi
 # Removing either tunnel must leave the other data path and forwarding enabled.
 gf "$entry" --tunnel exit2 down
 [[ $(ip netns exec "$entry" sysctl -n net.ipv4.ip_forward) == 1 ]]

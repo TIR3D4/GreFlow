@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>GreFlow · مدیریت تانل‌ها</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">رفتن به محتوا</a>
+    <div id="auth"></div>
+    <div id="shell" hidden>
+      <aside class="sidebar" id="sidebar">
+        <a href="#overview" class="brand"
+          ><span class="brand-mark">G</span
+          ><b dir="ltr">GreFlow<span>کنسول مدیریت</span></b></a
+        >
+        <nav id="navigation" aria-label="ناوبری اصلی"></nav>
+        <div class="sidebar-foot">
+          <span class="chip blue">GRE · پروتکل ۱</span>
+          <p>هر وضعیت، بر پایهٔ شواهد مستقل</p>
+        </div>
+      </aside>
+      <div class="workspace">
+        <header class="topbar">
+          <button
+            id="menu-toggle"
+            class="icon-button"
+            aria-label="باز کردن منو"
+            aria-expanded="false"
+          ></button
+          ><span id="breadcrumb"></span>
+          <div class="topbar-actions">
+            <span id="identity"></span
+            ><button
+              id="theme-toggle"
+              class="icon-button"
+              aria-label="تغییر پوسته"
+            ></button
+            ><button class="btn" data-action="logout">خروج</button>
+          </div>
+        </header>
+        <div id="connection" class="notice" hidden></div>
+        <main id="main" tabindex="-1"></main>
+      </div>
+    </div>
+    <div id="modal-root"></div>
+    <div id="toast" aria-label="پیام‌های برنامه"></div>
+  </body>
+</html>

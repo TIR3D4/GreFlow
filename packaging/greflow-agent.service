@@ -1,0 +1,14 @@
+[Unit]
+Description=GreFlow outbound authenticated dispatcher
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/greflow/console-agent.json
+
+[Service]
+ExecStart=/usr/local/bin/greflow-agent run
+Restart=on-failure
+RestartSec=15
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
